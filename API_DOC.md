@@ -21,7 +21,7 @@
   - ball_speed, release_angle_height, skeleton_coords 등은 영상 id(pk)로 조회
 
 - **공 궤적 및 속도 분석**
-  - **YOLO 모델(`ref_doc/best_baseball_ball.pt`)을 사용**하여 공 궤적 추적, 속도 계산
+  - **YOLO 모델(`model_path/best_baseball_ball.pt`)을 사용**하여 공 궤적 추적, 속도 계산
   - **이미지 저장 없이, 궤적 좌표와 속도를 JSON으로 반환**
 
 - **릴리스 프레임 각도/기울기/손 높이 분석**
