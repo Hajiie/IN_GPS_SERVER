@@ -190,6 +190,7 @@ $RECYCLE.BIN/
 # Project specific
 # ref_doc 폴더 전체 제외 (모델 파일, 분석 노트북 등)
 ref_doc/
+model_path/
 
 # 분석 결과 이미지들
 media/results/

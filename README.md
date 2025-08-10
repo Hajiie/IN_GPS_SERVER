@@ -64,7 +64,7 @@ DB_PORT=5432
 
 ```
 IN_GPS_SERVER/
-├── analysis/           # 분석 앱
+├── analysis/          # 분석 앱
 │   ├── models.py      # 데이터 모델
 │   ├── views.py       # API 뷰
 │   ├── urls.py        # URL 라우팅
@@ -73,22 +73,24 @@ IN_GPS_SERVER/
 │   ├── settings.py    # Django 설정
 │   └── urls.py        # 메인 URL 설정
 ├── media/             # 업로드된 파일들
+├── model_path/        # YOLO 모델 파일 (Git 제외)
 ├── ref_doc/           # 참고 문서 (Git 제외)
 ├── .env.example       # 환경 변수 템플릿
 ├── .gitignore         # Git 제외 파일 목록
+├── API_DOC.md         # API 문서
 └── README.md          # 이 파일
 ```
 
 ## API 문서
 
-자세한 API 문서는 `ref_doc/API_DOC.md`를 참조하세요.
+자세한 API 문서는 `API_DOC.md`를 참조하세요.
 
 ## 주의사항
 
 1. **보안**: `.env` 파일에 실제 비밀번호와 API 키를 저장하세요
 2. **데이터베이스**: 운영 환경에서는 PostgreSQL을 권장합니다
 3. **파일 업로드**: `media/` 폴더는 Git에 포함되지 않습니다
-4. **모델 파일**: `ref_doc/` 폴더의 YOLO 모델은 Git에 포함되지 않습니다
+4. **모델 파일**: `model_path/` 폴더의 YOLO 모델은 Git에 포함되지 않습니다
 
 ## 문제 해결
 
