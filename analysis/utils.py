@@ -1,3 +1,11 @@
+# Copyright (c) 2024 TACTICS. All Rights Reserved.
+#
+# 이 소프트웨어의 상업적 사용, 수정 및 배포를 금지합니다.
+# 허가 없이 이 코드를 사용, 복제, 수정, 배포할 수 없습니다.
+#
+# Commercial use, modification, and distribution of this software are prohibited.
+# You may not use, copy, modify, or distribute this code without permission.
+
 import cv2
 import numpy as np
 import math
@@ -233,7 +241,6 @@ def visualize_ball_speed(video_path, release_frame, landmarks_list, yolo_model, 
 
     cv2.imwrite(save_path, img)
     return red_points
-
 def get_ball_trajectory_and_speed(video_path, release_frame, yolo_model, width, height,
                                   shin_length, SHIN_LENGTH_M=0.4, VIDEO_FPS=120):
     import numpy as np
