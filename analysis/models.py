@@ -1,10 +1,22 @@
+import os
+import uuid
 from django.db import models
 from django.utils import timezone
 from django.db.models import JSONField
+from django.utils.text import slugify
 
-# Create your models here.
+def get_video_upload_path(instance, filename):
+    """Dynamically sets the upload path and filename."""
+    ext = filename.split('.')[-1]
+    if instance.video_name and instance.video_name.strip():
+        base_name = slugify(instance.video_name, allow_unicode=True)
+    else:
+        base_name = timezone.now().strftime('%Y-%m-%d_%H-%M-%S')
+    new_filename = f"{base_name}.{ext}"
+    return os.path.join('media/videos', new_filename)
 
 class Player(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     birth_date = models.DateField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)  # cm
@@ -68,8 +80,10 @@ class PlayerStats(models.Model):
         super().save(*args, **kwargs)
 
 class VideoAnalysis(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     player = models.ForeignKey(Player, on_delete=models.CASCADE, null=True, blank=True, related_name='videos')
-    filename = models.CharField(max_length=255, unique=True)
+    video_name = models.CharField(max_length=255, null=True, blank=True)
+    video_file = models.FileField(upload_to=get_video_upload_path, max_length=255)
     upload_time = models.DateTimeField(default=timezone.now)
     frame_list = JSONField(null=True, blank=True)
     fixed_frame = models.IntegerField(null=True, blank=True)
@@ -83,4 +97,10 @@ class VideoAnalysis(models.Model):
     skeleton_coords = JSONField(null=True, blank=True)  # release_frame 기준 랜드마크 좌표
 
     def __str__(self):
-        return self.filename
+        return self.video_name or os.path.basename(self.video_file.name)
+
+    def delete(self, *args, **kwargs):
+        # First, delete the video file from storage
+        self.video_file.delete(save=False)
+        # Now, call the superclass method to delete the database record
+        super().delete(*args, **kwargs)
