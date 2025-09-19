@@ -1,105 +1,129 @@
-# IN_GPS_SERVER - 투수 분석 백엔드
+# IN-GPS Pitching Analysis Backend
 
-Django 기반 투수 분석 백엔드 서버입니다.
+**IN-GPS**는 Django 기반의 투수 동작 분석 백엔드 서버입니다. 영상 업로드, 선수 관리, 투구 분석 등 다양한 기능을 RESTful API로 제공하여, 클라이언트 애플리케이션에서 투수의 데이터를 체계적으로 관리하고 분석 결과를 활용할 수 있도록 지원합니다.
+
+---
+
+##  주요 기능
+
+- **선수 관리**: 선수 정보(이름, 신체 정보, 투타 방향 등)의 생성, 조회, 수정, 삭제 (CRUD)
+- **시즌 기록 관리**: 선수별 시즌 성적 및 상세 스탯 관리
+- **영상 관리**: 투구 영상 업로드, 조회, 삭제 및 영상에 대한 메타데이터 관리
+- **투구 분석**: MediaPipe와 YOLO를 활용한 자동 분석
+  - **투구 동작 분할**: 투구의 주요 4단계(Start, Max Knee, Fixed, Release) 프레임 자동 검출
+  - **공 속도 및 궤적**: 릴리스 이후의 공의 궤적을 추적하고 속도(km/h) 계산
+  - **릴리스 포인트 분석**: 릴리스 순간의 팔 각도, 상체 기울기, 손 높이 등 상세 데이터 추출
+  - **유사도 분석 (DTW)**: 기준 영상들과의 투구폼 유사도를 구간별로 점수화
+- **간편 실행**: `run_server.py`를 통해 데이터베이스 자동 생성 및 서버 실행을 한 번에 처리
+
+---
 
 ## 시작하기
 
-### 1. 환경 설정
+이 섹션은 프로젝트를 로컬 환경에서 설정하고 실행하는 방법을 안내합니다.
 
-#### 환경 변수 설정
-1. `.env.example` 파일을 `.env`로 복사합니다:
+### 1. 사전 요구사항
+
+- Python 3.8 이상
+- `pip` (Python 패키지 관리자)
+
+### 2. 설치 및 설정
+
+**1. 프로젝트 복제**
 ```bash
- cp .env.example .env
+git clone https://your-repository-url.git
+cd IN_GPS_SERVER
 ```
 
-2. `.env` 파일을 편집하여 실제 값들을 입력합니다:
+**2. 가상 환경 생성 및 활성화 (권장)**
 ```bash
- # Django Settings
-SECRET_KEY=your-actual-secret-key-here
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
+
+# macOS / Linux
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**3. 의존성 패키지 설치**
+프로젝트에 필요한 모든 라이브러리를 설치합니다.
+```bash
+pip install -r requirements.txt
+```
+
+**4. 환경 변수 설정**
+`.env.example` 파일을 `.env` 파일로 복사한 후, 내용을 수정합니다. 이 프로젝트는 Django의 `SECRET_KEY`만 필요합니다.
+```bash
+cp .env.example .env
+```
+
+`.env` 파일 내용을 아래와 같이 수정하세요.
+```dotenv
+# Django Settings
+# 이 값은 반드시 실제 운영 환경에서는 예측 불가능한 강력한 값으로 변경해야 합니다.
+SECRET_KEY='your-django-secret-key-here'
+
+# 디버그 모드 (개발 시 True, 운영 시 False)
 DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-
-# Database Settings
-DB_NAME=ingps
-DB_USER=ingpsuser
-DB_PASSWORD=your-actual-database-password
-DB_HOST=localhost
-DB_PORT=5432
 ```
 
-### 2. 의존성 설치
+**5. YOLO 모델 파일 준비**
+`model_path/` 디렉터리 안에 분석에 사용할 `best_baseball_ball.pt` 파일을 위치시켜야 합니다. 이 파일은 Git에 포함되어 있지 않으므로 별도로 준비해야 합니다.
+
+### 3. 서버 실행
+
+모든 설정이 완료되면, 아래 명령어로 서버를 실행합니다. 이 스크립트는 **데이터베이스 파일(`db.sqlite3`)이 없으면 자동으로 생성 및 마이그레이션**한 후, `waitress` 프로덕션 서버를 `http://127.0.0.1:8000` 주소로 실행합니다.
+
 ```bash
- pip install -r requirements.txt
+python run_server.py
 ```
 
-### 3. 데이터베이스 마이그레이션
-```bash
- python manage.py makemigrations
- python manage.py migrate
+서버가 성공적으로 실행되면, 터미널에 다음과 같은 메시지가 출력됩니다.
+```
+데이터베이스 초기 설정을 시작합니다...
+데이터베이스 설정이 완료되었습니다.
+서버를 http://127.0.0.1:8000 에서 시작합니다.
+Serving on http://127.0.0.1:8000
 ```
 
-### 4. 서버 실행
-```bash
- python manage.py runserver
-```
-
-## 보안 설정
-
-### 중요: 환경 변수 관리
-- **절대 `.env` 파일을 Git에 커밋하지 마세요!**
-- `.env` 파일은 이미 `.gitignore`에 포함되어 있습니다
-- 실제 운영 환경에서는 더 강력한 비밀번호를 사용하세요
-
-### 환경 변수 목록
-- `SECRET_KEY`: Django 시크릿 키 (운영 환경에서는 반드시 변경)
-- `DEBUG`: 디버그 모드 (운영 환경에서는 False)
-- `ALLOWED_HOSTS`: 허용된 호스트 목록
-- `DB_NAME`: 데이터베이스 이름
-- `DB_USER`: 데이터베이스 사용자
-- `DB_PASSWORD`: 데이터베이스 비밀번호
-- `DB_HOST`: 데이터베이스 호스트
-- `DB_PORT`: 데이터베이스 포트
-
-## 📁 프로젝트 구조
-
-```
-IN_GPS_SERVER/
-├── analysis/          # 분석 앱
-│   ├── models.py      # 데이터 모델
-│   ├── views.py       # API 뷰
-│   ├── urls.py        # URL 라우팅
-│   └── utils.py       # 분석 유틸리티
-├── IN_GPS_SERVER/     # 프로젝트 설정
-│   ├── settings.py    # Django 설정
-│   └── urls.py        # 메인 URL 설정
-├── media/             # 업로드된 파일들
-├── model_path/        # YOLO 모델 파일 (Git 제외)
-├── ref_doc/           # 참고 문서 (Git 제외)
-├── .env.example       # 환경 변수 템플릿
-├── .gitignore         # Git 제외 파일 목록
-├── API_DOC.md         # API 문서
-└── README.md          # 이 파일
-```
+---
 
 ## API 문서
 
-자세한 API 문서는 `API_DOC.md`를 참조하세요.
+제공되는 모든 API의 상세한 명세(엔드포인트, 요청/응답 형식, 예시 등)는 아래 문서를 참조하세요.
 
-## 주의사항
+- **[API_DOC.md](./API_DOC.md)**
 
-1. **보안**: `.env` 파일에 실제 비밀번호와 API 키를 저장하세요
-2. **데이터베이스**: 운영 환경에서는 PostgreSQL을 권장합니다
-3. **파일 업로드**: `media/` 폴더는 Git에 포함되지 않습니다
-4. **모델 파일**: `model_path/` 폴더의 YOLO 모델은 Git에 포함되지 않습니다
+---
 
-## 문제 해결
+## 프로젝트 구조
 
-### 환경 변수 관련 오류
-- `.env` 파일이 존재하는지 확인
-- 환경 변수 이름이 올바른지 확인
-- 값에 특수문자가 있다면 따옴표로 감싸기
+```
+IN_GPS_SERVER/
+├── analysis/          # 핵심 분석 기능 앱
+│   ├── models.py      # 데이터 모델 (Player, VideoAnalysis 등)
+│   ├── views.py       # API 로직
+│   ├── urls.py        # API URL 라우팅
+│   └── utils.py       # 영상 분석 알고리즘
+├── IN_GPS_SERVER/     # Django 프로젝트 설정
+│   ├── settings.py    # 메인 설정 (DB, 미디어 등)
+│   └── wsgi.py        # WSGI 서버 연동
+├── media/             # (자동생성) 업로드된 영상 파일 저장
+├── model_path/        # YOLO 모델 파일 위치
+├── .env               # (생성필요) 환경 변수 파일
+├── .env.example       # 환경 변수 템플릿
+├── API_DOC.md         # API 상세 명세서
+├── run_server.py      # DB 자동 생성 및 서버 실행 스크립트
+├── manage.py          # Django 관리 스크립트
+├── requirements.txt   # 의존성 패키지 목록
+└── README.md          # 프로젝트 안내 문서
+```
 
-### 데이터베이스 연결 오류
-- PostgreSQL이 실행 중인지 확인
-- 데이터베이스 사용자와 비밀번호가 올바른지 확인
-- 데이터베이스가 생성되어 있는지 확인
+---
+
+## 라이선스
+
+이 프로젝트는 `analysis/utils.py` 파일을 제외하고 [MIT License](./LICENSE)를 따릅니다.
+
+`analysis/utils.py` 파일에 포함된 알고리즘은 **TACTICS**의 자산으로, 해당 파일 상단에 명시된 저작권 정책에 따라 상업적 사용, 수정 및 배포가 금지됩니다.
