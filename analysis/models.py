@@ -82,7 +82,7 @@ class PlayerStats(models.Model):
 class VideoAnalysis(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     player = models.ForeignKey(Player, on_delete=models.CASCADE, null=True, blank=True, related_name='videos')
-    video_name = models.CharField(max_length=255, null=True, blank=True)
+    video_name = models.CharField(max_length=255, null=True, blank=True, unique=True)
     video_file = models.FileField(upload_to=get_video_upload_path, max_length=255)
     upload_time = models.DateTimeField(default=timezone.now)
     frame_list = JSONField(null=True, blank=True)

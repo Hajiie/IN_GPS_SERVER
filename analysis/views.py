@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from django.db import IntegrityError
 import os
 import json
 import uuid
@@ -27,51 +28,47 @@ except Exception as e:
 
 @csrf_exempt
 def upload_video(request):
-    if request.method == 'POST' and request.FILES.get('video'):
-        video_file = request.FILES['video']
-        video_name = request.POST.get('video_name') # Get the optional video name
-        
-        # 선수 정보 받기
-        player_name = request.POST.get('player_name')
-        birth_date = request.POST.get('birth_date')
-        
-        if not player_name or not birth_date:
-            return JsonResponse({
-                'result': 'fail', 
-                'reason': '선수 이름과 생년월일을 모두 입력해주세요'
-            }, status=400)
-        
-        # 선수 찾기 또는 생성
-        try:
-            from datetime import datetime
-            birth_date_obj = datetime.strptime(birth_date, '%Y-%m-%d').date()
-            player, created = Player.objects.get_or_create(
-                name=player_name,
-                birth_date=birth_date_obj,
-                defaults={'name': player_name, 'birth_date': birth_date_obj}
-            )
-        except ValueError:
-            return JsonResponse({
-                'result': 'fail', 
-                'reason': '생년월일 형식이 올바르지 않습니다. YYYY-MM-DD 형식으로 입력해주세요'
-            }, status=400)
-        
-        # VideoAnalysis 객체 생성
+    if request.method != 'POST' or not request.FILES.get('video'):
+        return JsonResponse({'result': 'fail', 'reason': '올바르지 않은 요청입니다.'}, status=400)
+
+    video_file = request.FILES['video']
+    video_name = request.POST.get('video_name')
+    player_name = request.POST.get('player_name')
+    birth_date = request.POST.get('birth_date')
+
+    if not player_name or not birth_date:
+        return JsonResponse({'result': 'fail', 'reason': '선수 이름과 생년월일을 모두 입력해주세요'}, status=400)
+
+    try:
+        birth_date_obj = datetime.strptime(birth_date, '%Y-%m-%d').date()
+        player, _ = Player.objects.get_or_create(
+            name=player_name,
+            birth_date=birth_date_obj,
+            defaults={'name': player_name, 'birth_date': birth_date_obj}
+        )
+    except ValueError:
+        return JsonResponse({'result': 'fail', 'reason': '생년월일 형식이 올바르지 않습니다. YYYY-MM-DD 형식으로 입력해주세요'}, status=400)
+
+    try:
         video_obj = VideoAnalysis.objects.create(
             player=player,
-            video_name=video_name,
+            video_name=video_name if video_name else None, # Ensure empty string is saved as NULL
             video_file=video_file
         )
-        
+    except IntegrityError:
         return JsonResponse({
-            'result': 'success',
-            'video_id': str(video_obj.id),
-            'video_name': video_obj.video_name or os.path.basename(video_obj.video_file.name),
-            'video_url': video_obj.video_file.url,
-            'player_id': str(player.id),
-            'player_name': player.name,
-        })
-    return JsonResponse({'result': 'fail', 'reason': 'No file uploaded or not a POST request'}, status=400)
+            'result': 'fail',
+            'reason': f'이미 사용 중인 영상 이름입니다: "{video_name}"'
+        }, status=409) # 409 Conflict
+
+    return JsonResponse({
+        'result': 'success',
+        'video_id': str(video_obj.id),
+        'video_name': video_obj.video_name or os.path.basename(video_obj.video_file.name),
+        'video_url': video_obj.video_file.url,
+        'player_id': str(player.id),
+        'player_name': player.name,
+    })
 
 @csrf_exempt
 def delete_video_api(request, video_id):
@@ -92,20 +89,13 @@ def delete_video_api(request, video_id):
         return JsonResponse({'result': 'fail', 'reason': str(e)}, status=500)
 
 @csrf_exempt
-def analyze_video_api(request):
+def analyze_video_api(request, video_id):
     if request.method == 'POST':
-        import json
-        try:
-            data = json.loads(request.body)
-            video_id = data.get('video_id')
-        except Exception:
-            return JsonResponse({'result': 'fail', 'reason': 'Invalid JSON'}, status=400)
-        
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
         
         try:
-            video_obj = VideoAnalysis.objects.get(id=video_id)
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
             video_path = video_obj.video_file.path
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
@@ -170,28 +160,24 @@ def analyze_video_api(request):
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
 
 @csrf_exempt
-def ball_speed_api(request):
+def ball_speed_api(request, video_id):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        video_id = data.get('id')
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
-            video_obj = VideoAnalysis.objects.get(id=video_id)
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'ball_speed': video_obj.ball_speed})
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
 
 @csrf_exempt
-def release_angle_height_api(request):
+def release_angle_height_api(request, video_id):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        video_id = data.get('id')
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
-            video_obj = VideoAnalysis.objects.get(id=video_id)
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'release_angle_height': video_obj.release_angle_height})
@@ -234,14 +220,12 @@ def dtw_similarity_api(request):
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
 
 @csrf_exempt
-def skeleton_coords_api(request):
+def skeleton_coords_api(request, video_id):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        video_id = data.get('id')
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
-            video_obj = VideoAnalysis.objects.get(id=video_id)
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'skeleton_coords': video_obj.skeleton_coords})
