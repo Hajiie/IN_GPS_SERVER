@@ -13,6 +13,15 @@ import mediapipe as mp
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 import os
+import sys
+
+# --- PyInstaller: Force MediaPipe to use bundled models ---
+# This must be at the very top, before mediapipe is imported.
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # In a frozen app, tell MediaPipe to use the models from the temp folder
+    # where PyInstaller has unpacked them.
+    os.environ['MEDIAPIPE_MODEL_CACHE_DIR'] = os.path.join(sys._MEIPASS, 'mediapipe', 'modules')
+
 
 # --- 1. 투구 동작 자동 분할 ---
 def analyze_video(video_path, yolo_model=None):

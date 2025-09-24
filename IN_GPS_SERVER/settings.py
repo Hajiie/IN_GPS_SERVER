@@ -10,11 +10,20 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import sys
+import os
 from pathlib import Path
 from decouple import config
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+# --- Dynamic BASE_DIR for PyInstaller Support ---
+# This logic ensures that whether running as a script or a frozen .exe,
+# the base directory is correctly identified.
+if getattr(sys, 'frozen', False):
+    # Running as a PyInstaller bundle
+    BASE_DIR = Path(os.path.dirname(sys.executable))
+else:
+    # Running as a normal .py script
+    BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
@@ -122,4 +131,6 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-
+# Media files (user-uploaded files)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

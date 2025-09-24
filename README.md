@@ -1,6 +1,6 @@
 # IN-GPS Pitching Analysis Backend
 
-**IN-GPS**는 Django 기반의 투수 동작 분석 백엔드 서버입니다. 영상 업로드, 선수 관리, 투구 분석 등 다양한 기능을 RESTful API로 제공하여, 클라이언트 애플리케이션에서 투수의 데이터를 체계적으로 관리하고 분석 결과를 활용할 수 있도록 지원합니다.
+**Pitching Analysis Backend**는 Django 기반의 투수 동작 분석 백엔드 서버입니다. 영상 업로드, 선수 관리, 투구 분석 등 다양한 기능을 RESTful API로 제공하여, 클라이언트 애플리케이션에서 투수의 데이터를 체계적으로 관리하고 분석 결과를 활용할 수 있도록 지원합니다.
 
 ---
 
@@ -24,14 +24,14 @@
 
 ### 1. 사전 요구사항
 
-- Python 3.8 이상
+- Python 3.8 이상, 3.11 이하
 - `pip` (Python 패키지 관리자)
 
 ### 2. 설치 및 설정
 
 **1. 프로젝트 복제**
 ```bash
-git clone https://your-repository-url.git
+git clone https://github.com/Hajiie/IN_GPS_SERVER.git
 cd IN_GPS_SERVER
 ```
 
@@ -86,6 +86,30 @@ python run_server.py
 서버를 http://127.0.0.1:8000 에서 시작합니다.
 Serving on http://127.0.0.1:8000
 ```
+
+---
+
+## exe 파일 생성
+
+```bash
+# MediaPipe 라이브러리 경로 찾기
+python -c "import mediapipe, os; print(os.path.dirname(mediapipe.__file__))"
+```
+
+```bash
+# PyInstaller 빌드 실행
+pyinstaller --name "IN_GPS_SERVER" --onefile ^
+--hidden-import "ultralytics" ^
+--hidden-import "decouple" ^
+--hidden-import "waitress" ^
+--add-data "IN_GPS_SERVER;IN_GPS_SERVER" ^
+--add-data "analysis;analysis" ^
+--add-data "model_path;model_path" ^
+--add-data "(위에서 찾은 MediaPipe 경로))\modules;mediapipe/modules" ^
+run_server.py
+```
+
+생성된 dist 폴더 내에 model_path 폴더를 위치시키고 model_path 폴더 내에 .pt 파일을 추가
 
 ---
 
