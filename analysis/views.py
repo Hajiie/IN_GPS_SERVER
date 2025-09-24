@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from .models import Player, PlayerSeason, PlayerStats, VideoAnalysis
 from .utils import (
+    create_thumbnail_from_video,
     analyze_video, get_ball_trajectory_and_speed,
     get_joint_angles, get_hand_height,
     generate_average_forms, evaluate_against_average_form
@@ -23,8 +24,6 @@ try:
     yolo_model = YOLO(os.path.join(settings.BASE_DIR, 'model_path', 'best_baseball_ball.pt'))
 except Exception as e:
     print(f"[경고] YOLO 모델 로드 실패: {e}")
-
-# ... (기존 뷰 함수들) ...
 
 @csrf_exempt
 def upload_video(request):
@@ -52,23 +51,52 @@ def upload_video(request):
     try:
         video_obj = VideoAnalysis.objects.create(
             player=player,
-            video_name=video_name if video_name else None, # Ensure empty string is saved as NULL
+            video_name=video_name if video_name else None,
             video_file=video_file
         )
     except IntegrityError:
         return JsonResponse({
             'result': 'fail',
             'reason': f'이미 사용 중인 영상 이름입니다: "{video_name}"'
-        }, status=409) # 409 Conflict
+        }, status=409)
+
+    # --- Thumbnail Generation ---
+    thumbnail_content = create_thumbnail_from_video(video_file)
+    if thumbnail_content:
+        # Create a filename for the thumbnail
+        thumbnail_name = f"{os.path.splitext(os.path.basename(video_obj.video_file.name))[0]}.jpg"
+        video_obj.thumbnail.save(thumbnail_name, thumbnail_content, save=True)
 
     return JsonResponse({
         'result': 'success',
         'video_id': str(video_obj.id),
         'video_name': video_obj.video_name or os.path.basename(video_obj.video_file.name),
         'video_url': video_obj.video_file.url,
+        'thumbnail_url': video_obj.thumbnail.url if video_obj.thumbnail else None,
         'player_id': str(player.id),
         'player_name': player.name,
     })
+
+@csrf_exempt
+def videos_list_api(request):
+    if request.method == 'GET':
+        videos = VideoAnalysis.objects.all().order_by('-upload_time')
+        result = [
+            {
+                'id': str(v.id),
+                'video_name': v.video_name or os.path.basename(v.video_file.name),
+                'video_url': v.video_file.url,
+                'thumbnail_url': v.thumbnail.url if v.thumbnail else None,
+                'upload_time': v.upload_time.isoformat(),
+                'player_id': str(v.player.id) if v.player else None,
+                'player_name': v.player.name if v.player else None,
+            }
+            for v in videos
+        ]
+        return JsonResponse(result, safe=False)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
+
+# ... (The rest of the views remain the same) ...
 
 @csrf_exempt
 def delete_video_api(request, video_id):
@@ -230,24 +258,6 @@ def skeleton_coords_api(request, video_id):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'skeleton_coords': video_obj.skeleton_coords})
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
-
-@csrf_exempt
-def videos_list_api(request):
-    if request.method == 'GET':
-        videos = VideoAnalysis.objects.all().order_by('-upload_time')
-        result = [
-            {
-                'id': str(v.id),
-                'video_name': v.video_name or os.path.basename(v.video_file.name),
-                'video_url': v.video_file.url,
-                'upload_time': v.upload_time.isoformat(),
-                'player_id': str(v.player.id) if v.player else None,
-                'player_name': v.player.name if v.player else None,
-            }
-            for v in videos
-        ]
-        return JsonResponse(result, safe=False)
-    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
 
 @csrf_exempt
 def players_list_api(request):

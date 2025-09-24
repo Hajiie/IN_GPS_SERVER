@@ -6,7 +6,6 @@
 # Commercial use, modification, and distribution of this software are prohibited.
 # You may not use, copy, modify, or distribute this code without permission.
 
-import cv2
 import numpy as np
 import math
 import mediapipe as mp
@@ -14,6 +13,9 @@ from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 import os
 import sys
+from django.conf import settings
+from django.core.files.base import ContentFile
+import cv2
 
 # --- PyInstaller: Force MediaPipe to use bundled models ---
 # This must be at the very top, before mediapipe is imported.
@@ -21,6 +23,34 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     # In a frozen app, tell MediaPipe to use the models from the temp folder
     # where PyInstaller has unpacked them.
     os.environ['MEDIAPIPE_MODEL_CACHE_DIR'] = os.path.join(sys._MEIPASS, 'mediapipe', 'modules')
+
+
+
+def create_thumbnail_from_video(video_file):
+    """
+    Extracts the first frame from a video file and returns it as a Django ContentFile.
+    """
+    # Use a temporary path to save the video file for processing
+    temp_video_path = os.path.join(settings.MEDIA_ROOT, 'temp_video.mp4')
+    with open(temp_video_path, 'wb+') as f:
+        for chunk in video_file.chunks():
+            f.write(chunk)
+
+    cap = cv2.VideoCapture(temp_video_path)
+    success, frame = cap.read()
+    cap.release()
+    os.remove(temp_video_path) # Clean up the temporary video file
+
+    if not success:
+        return None
+
+    # Encode the frame as a JPEG image in memory
+    is_success, buffer = cv2.imencode(".jpg", frame)
+    if not is_success:
+        return None
+
+    # Create a Django ContentFile from the in-memory buffer
+    return ContentFile(buffer.tobytes())
 
 
 # --- 1. 투구 동작 자동 분할 ---
@@ -438,4 +468,4 @@ def evaluate_against_average_form(test_video_path, average_forms, used_ids):
         phase_scores.append(score)
         phase_distances.append(dist)
     worst_idx = np.argmin(phase_scores) + 1
-    return phase_scores, phase_distances, worst_idx 
+    return phase_scores, phase_distances, worst_idx

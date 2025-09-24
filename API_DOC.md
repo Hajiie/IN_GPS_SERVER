@@ -165,7 +165,9 @@
   "video_id": "d1e2f3a4-b5c6-7890-1234-567890abcdef",
   "video_name": "사용자 지정 영상 이름",
   "video_url": "/media/videos/사용자-지정-영상-이름.mp4",
-  "player_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210"
+  "thumbnail_url": "/media/thumbnails/사용자-지정-영상-이름.jpg",
+  "player_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
+  "player_name": "선수이름"
 }
 ```
 - **실패 응답 (이름 중복 시)**: `409 Conflict`
@@ -186,6 +188,7 @@
     "id": "d1e2f3a4-b5c6-7890-1234-567890abcdef",
     "video_name": "사용자 지정 영상 이름",
     "video_url": "/media/videos/사용자-지정-영상-이름.mp4",
+    "thumbnail_url": "/media/thumbnails/사용자-지정-영상-이름.jpg",
     "upload_time": "2024-07-25T12:34:56Z",
     "player_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
     "player_name": "홍길동"

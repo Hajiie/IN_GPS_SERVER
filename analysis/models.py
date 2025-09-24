@@ -84,6 +84,7 @@ class VideoAnalysis(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE, null=True, blank=True, related_name='videos')
     video_name = models.CharField(max_length=255, null=True, blank=True, unique=True)
     video_file = models.FileField(upload_to=get_video_upload_path, max_length=255)
+    thumbnail = models.ImageField(upload_to='thumbnails/', null=True, blank=True)
     upload_time = models.DateTimeField(default=timezone.now)
     frame_list = JSONField(null=True, blank=True)
     fixed_frame = models.IntegerField(null=True, blank=True)
@@ -100,7 +101,9 @@ class VideoAnalysis(models.Model):
         return self.video_name or os.path.basename(self.video_file.name)
 
     def delete(self, *args, **kwargs):
-        # First, delete the video file from storage
+        # First, delete the video file and thumbnail from storage
         self.video_file.delete(save=False)
+        if self.thumbnail:
+            self.thumbnail.delete(save=False)
         # Now, call the superclass method to delete the database record
         super().delete(*args, **kwargs)
