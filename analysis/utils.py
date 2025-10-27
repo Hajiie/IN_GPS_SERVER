@@ -6,31 +6,62 @@
 # Commercial use, modification, and distribution of this software are prohibited.
 # You may not use, copy, modify, or distribute this code without permission.
 
-import numpy as np
-import math
-import mediapipe as mp
-from fastdtw import fastdtw
-from scipy.spatial.distance import euclidean
 import os
 import sys
+import math
+import cv2
+import numpy as np
+import mediapipe as mp
+import pandas as pd
+from ultralytics import YOLO
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
+from typing import Dict, List, Tuple, Optional, Set
+
 from django.conf import settings
 from django.core.files.base import ContentFile
-import cv2
 
 # --- PyInstaller: Force MediaPipe to use bundled models ---
-# This must be at the very top, before mediapipe is imported.
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    # In a frozen app, tell MediaPipe to use the models from the temp folder
-    # where PyInstaller has unpacked them.
     os.environ['MEDIAPIPE_MODEL_CACHE_DIR'] = os.path.join(sys._MEIPASS, 'mediapipe', 'modules')
 
+# =================================================================================
+# Constants
+# =================================================================================
 
+# --- MediaPipe Landmark Indices ---
+NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW = 0, 11, 12, 13, 14
+LEFT_WRIST, RIGHT_WRIST, LEFT_INDEX, RIGHT_INDEX = 15, 16, 19, 20
+LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE = 23, 24, 25, 26, 27, 28
+LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX = 29, 30, 31, 32
+
+# --- Skeleton Rendering ---
+LEFT_EDGES = [(11, 13), (13, 15), (15, 21), (15, 17), (15, 19), (17, 19),
+              (11, 23), (23, 25), (25, 27), (27, 29), (27, 31), (29, 31)]
+RIGHT_EDGES = [(12, 14), (14, 16), (16, 22), (16, 18), (16, 20), (18, 20),
+               (12, 24), (24, 26), (26, 28), (28, 30), (28, 32), (30, 32)]
+CENTER_EDGES = [(11, 12), (23, 24)]
+
+# --- Physics and Analysis ---
+SHIN_LENGTH_M = 0.45
+VIDEO_FPS = 120
+
+# =================================================================================
+# Custom Exception
+# =================================================================================
+
+class PhaseSegmentationError(Exception):
+    """Exception raised for errors in the video phase segmentation process."""
+    pass
+
+# =================================================================================
+# Django-related Utilities
+# =================================================================================
 
 def create_thumbnail_from_video(video_file):
     """
     Extracts the first frame from a video file and returns it as a Django ContentFile.
     """
-    # Use a temporary path to save the video file for processing
     temp_video_path = os.path.join(settings.MEDIA_ROOT, 'temp_video.mp4')
     with open(temp_video_path, 'wb+') as f:
         for chunk in video_file.chunks():
@@ -39,24 +70,27 @@ def create_thumbnail_from_video(video_file):
     cap = cv2.VideoCapture(temp_video_path)
     success, frame = cap.read()
     cap.release()
-    os.remove(temp_video_path) # Clean up the temporary video file
+    os.remove(temp_video_path)
 
     if not success:
         return None
 
-    # Encode the frame as a JPEG image in memory
     is_success, buffer = cv2.imencode(".jpg", frame)
     if not is_success:
         return None
 
-    # Create a Django ContentFile from the in-memory buffer
     return ContentFile(buffer.tobytes())
 
+# =================================================================================
+# Core Analysis Functions
+# =================================================================================
 
-# --- 1. 투구 동작 자동 분할 ---
-def analyze_video(video_path, yolo_model=None):
+def analyze_video(video_path, yolo_model):
+    """
+    Analyzes a video to find key pitching frames (start, max knee height, foot plant, release).
+    This is the primary function for video segmentation.
+    """
     cap = cv2.VideoCapture(video_path)
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -68,14 +102,11 @@ def analyze_video(video_path, yolo_model=None):
     knee_y_list, ankle_y_list, ankle_x_list = [], [], []
     foot_x_list, foot_y_list = [], []
 
-    LEFT_KNEE, LEFT_ANKLE, LEFT_FOOT_INDEX = 25, 27, 31
-    RIGHT_KNEE, RIGHT_ANKLE = 26, 28
     SHIN_SCALE_DIVISOR = 10
 
     while True:
         ret, frame = cap.read()
-        if not ret:
-            break
+        if not ret: break
         frames.append(frame)
         results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if results.pose_landmarks:
@@ -87,22 +118,17 @@ def analyze_video(video_path, yolo_model=None):
             foot_y_list.append(int(lm[LEFT_FOOT_INDEX].y * height))
             landmarks_list.append(lm)
         else:
-            knee_y_list.append(None)
-            ankle_y_list.append(None)
-            ankle_x_list.append(None)
-            foot_x_list.append(None)
-            foot_y_list.append(None)
+            knee_y_list.append(None); ankle_y_list.append(None); ankle_x_list.append(None)
+            foot_x_list.append(None);  foot_y_list.append(None)
             landmarks_list.append(None)
     cap.release()
 
     total_frames = len(frames)
-    print(f"total fremes: {total_frames}")
-    print(f"landmarks: {len(landmarks_list)}")
     valid_knees = [(i, y) for i, y in enumerate(knee_y_list) if y is not None]
     max_knee_frame = min(valid_knees, key=lambda x: x[1])[0] if valid_knees else None
 
     threshold = None
-    if max_knee_frame is not None:
+    if max_knee_frame is not None and landmarks_list[max_knee_frame] is not None:
         lm = landmarks_list[max_knee_frame]
         rk, ra = lm[RIGHT_KNEE], lm[RIGHT_ANKLE]
         x1, y1 = rk.x * width, rk.y * height
@@ -111,10 +137,10 @@ def analyze_video(video_path, yolo_model=None):
 
     start_frame, fixed_frame, release_frame = None, None, None
 
-    if threshold:
+    if threshold and max_knee_frame is not None:
         count = 0
         for i in range(max_knee_frame - 5):
-            if ankle_y_list[i] and ankle_y_list[i + 5]:
+            if i + 5 < len(ankle_y_list) and ankle_y_list[i] and ankle_y_list[i + 5]:
                 if abs(ankle_y_list[i + 5] - ankle_y_list[i]) > threshold:
                     count += 1
                     if count == 5:
@@ -129,271 +155,252 @@ def analyze_video(video_path, yolo_model=None):
             valid = True
             for j in range(5):
                 f1, f2 = i + j, i + j + 10
-                if None in [
+                if f2 >= total_frames or None in [
                     ankle_x_list[f1], ankle_x_list[f2], ankle_y_list[f1], ankle_y_list[f2],
                     foot_x_list[f1], foot_x_list[f2], foot_y_list[f1], foot_y_list[f2]
                 ]:
-                    valid = False
-                    break
-                if (
-                    abs(ankle_x_list[f2] - ankle_x_list[f1]) > epsilon or
+                    valid = False; break
+                if (abs(ankle_x_list[f2] - ankle_x_list[f1]) > epsilon or
                     abs(ankle_y_list[f2] - ankle_y_list[f1]) > epsilon or
                     abs(foot_x_list[f2] - foot_x_list[f1]) > epsilon or
-                    abs(foot_y_list[f2] - foot_y_list[f1]) > epsilon
-                ):
-                    valid = False
-                    break
+                    abs(foot_y_list[f2] - foot_y_list[f1]) > epsilon):
+                    valid = False; break
             if valid:
-                fixed_frame = i
-                break
+                fixed_frame = i; break
 
-    release_fail_reason = None
     if fixed_frame:
         prev_dist = prev_pos = prev_len = None
         first_ball = False
+        last_hip_y_pix = None
         for n in range(fixed_frame, total_frames):
             frame = frames[n]
             lm = landmarks_list[n]
-            if lm:
-                elbow = (int(lm[14].x * width), int(lm[14].y * height))
-                wrist = (int(lm[16].x * width), int(lm[16].y * height))
-                index = (int(lm[20].x * width), int(lm[20].y * height))
-                hand = ((wrist[0] + index[0]) // 2, (wrist[1] + index[1]) // 2)
-                arm_len = np.linalg.norm(np.array(elbow) - np.array(wrist))
-            else:
-                continue
+            if not lm: continue
+
+            elbow = (int(lm[RIGHT_ELBOW].x * width), int(lm[RIGHT_ELBOW].y * height))
+            wrist = (int(lm[RIGHT_WRIST].x * width), int(lm[RIGHT_WRIST].y * height))
+            index = (int(lm[RIGHT_INDEX].x * width), int(lm[RIGHT_INDEX].y * height))
+            hand = ((wrist[0] + index[0]) // 2, (wrist[1] + index[1]) // 2)
+            arm_len = np.linalg.norm(np.array(elbow) - np.array(wrist))
 
             if arm_len < 20 or (prev_len and arm_len < prev_len * 0.2):
-                release_fail_reason = f"팔 길이 조건 불충족: frame {n}, arm_len={arm_len}"
                 continue
 
-            if yolo_model is not None:
-                results = yolo_model.predict(source=frame, conf=0.2, verbose=False)
-                # YOLO 탐지 로그 추가
-                ball_boxes = []
-                for r in results:
-                    for box in r.boxes:
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        ball_boxes.append([x1, y1, x2, y2])
-                print(f"[YOLO] frame {n}: {len(ball_boxes)}개 탐지됨, 좌표: {ball_boxes}")
+            lh, rh = lm[LEFT_HIP], lm[RIGHT_HIP]
+            vis_ok = (getattr(lh, "visibility", 1.0) > 0.5 and getattr(rh, "visibility", 1.0) > 0.5)
+            if vis_ok:
+                hip_y_pix = int(((lh.y + rh.y) / 2.0) * height)
+                last_hip_y_pix = hip_y_pix
             else:
-                results = []
-            ball_pos, detected = None, False
+                hip_y_pix = last_hip_y_pix
+            
+            WAIST_MARGIN = max(4, int(0.01 * height))
+
+            results = yolo_model.predict(source=frame, conf=0.2, verbose=False)
+            candidates = []
             for r in results:
+                if not hasattr(r, "boxes") or r.boxes is None: continue
                 for box in r.boxes:
+                    try: score = float(box.conf.cpu().item())
+                    except Exception: score = float(box.conf)
+                    if score < 0.10: continue
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    ball_pos = ((x1 + x2) // 2, (y1 + y2) // 2)
-                    detected = True
-                    break
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    if hip_y_pix is not None and cy >= hip_y_pix - WAIST_MARGIN: continue
+                    d2 = (cx - hand[0])**2 + (cy - hand[1])**2
+                    candidates.append((d2, (cx, cy)))
+
+            detected, ball_pos = False, None
+            if candidates:
+                candidates.sort(key=lambda t: t[0])
+                ball_pos = candidates[0][1]
+                detected = True
 
             if detected and not first_ball:
-                first_ball = True
-                prev_pos = ball_pos
+                first_ball = True; prev_pos = ball_pos
             elif not detected:
-                if not first_ball:
-                    release_fail_reason = f"공 미탐지: frame {n}"
-                    continue
+                if not first_ball: continue
                 ball_pos = prev_pos
 
             if ball_pos is not None:
                 dist = np.linalg.norm(np.array(hand) - np.array(ball_pos))
-                if prev_dist and abs(dist - prev_dist) > 50:
-                    release_fail_reason = f"손-공 거리 급변: frame {n}, dist={dist}, prev_dist={prev_dist}"
-                    continue
-                if prev_pos and np.linalg.norm(np.array(prev_pos) - np.array(ball_pos)) < 2:
-                    release_fail_reason = f"공 위치 변화 미미: frame {n}"
-                    continue
+                if prev_dist and abs(dist - prev_dist) > 50: continue
+                if prev_pos and np.linalg.norm(np.array(prev_pos) - np.array(ball_pos)) < 2: continue
                 if dist > arm_len * 0.5:
-                    release_frame = n
-                    break
+                    release_frame = n; break
                 prev_dist, prev_pos, prev_len = dist, ball_pos, arm_len
-    else:
-        release_fail_reason = "fixed_frame 탐지 실패"
 
-    if release_frame is None:
-        print(f"[release 프레임 탐지 실패] reason: {release_fail_reason}")
-
-    frame_list = [start_frame, max_knee_frame, fixed_frame, release_frame, (release_frame + 15) if release_frame is not None else None]
-
+    frame_list = [start_frame, max_knee_frame, fixed_frame, release_frame,
+                  (None if release_frame is None else release_frame + 15)]
     return {
-        'frame_list': frame_list,
-        'fixed_frame': fixed_frame,
-        'release_frame': release_frame,
-        'frames': frames,
-        'landmarks_list': landmarks_list,
-        'width': width,
-        'height': height
+        'frame_list': frame_list, 'fixed_frame': fixed_frame, 'release_frame': release_frame,
+        'frames': frames, 'landmarks_list': landmarks_list, 'width': width, 'height': height,
+        'max_knee_frame': max_knee_frame
     }
 
-# --- 2. 공 속도 및 궤적 시각화 ---
-def visualize_ball_speed(video_path, release_frame, landmarks_list, yolo_model, width, height,
-                         shin_length, save_path, SHIN_LENGTH_M=0.4, VIDEO_FPS=120):
+# =================================================================================
+# Calculation & Metric Functions
+# =================================================================================
+
+def get_ball_trajectory_and_speed(video_path, release_frame, yolo_model, shin_length_pixels, SHIN_LENGTH_M=0.45, VIDEO_FPS=120):
+    """
+    Calculates ball speed and trajectory after the release frame.
+    """
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened(): return {"trajectory": [], "speed_kph": None}
+    
     cap.set(cv2.CAP_PROP_POS_FRAMES, release_frame)
-
-    red_points = []
-    first_pos = last_pos = None
-
+    
+    tracked_positions = []
     while True:
         ret, frame = cap.read()
-        if not ret:
-            break
-
-        results = yolo_model.predict(source=frame, conf=0.5, verbose=False) if yolo_model else []
+        if not ret: break
+        results = yolo_model.predict(source=frame, conf=0.5, verbose=False)
         ball_found = False
-
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                red_points.append((cx, cy))
-                if first_pos is None:
-                    first_pos = np.array([cx, cy])
-                last_pos = np.array([cx, cy])
-                ball_found = True
-                break
-        if not ball_found:
-            break
-
-    cap.set(cv2.CAP_PROP_POS_FRAMES, release_frame)
-    _, base_frame = cap.read()
-    img = base_frame.copy()
-
-    for pt in red_points:
-        cv2.circle(img, pt, 5, (0, 0, 255), -1)
-
-    if first_pos is not None and last_pos is not None and shin_length > 0:
-        pixel_dist = np.linalg.norm(last_pos - first_pos)
-        norm_dist = pixel_dist / shin_length
-        frame_delta = len(red_points) - 1
-
-        if frame_delta > 0:
-            distance_m = norm_dist * SHIN_LENGTH_M
-            time_s = frame_delta / VIDEO_FPS
-            speed_kph = (distance_m / time_s) * 3.6
-
-            text = f"Speed: {speed_kph:.1f} km/h (frames={frame_delta})"
-            (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.6, 4)
-            cv2.rectangle(img, (20, 20), (20 + text_w + 20, 20 + text_h + 20), (255, 255, 255), -1)
-            cv2.putText(img, text, (30, 20 + text_h + 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 0, 0), 4)
-
-    cv2.imwrite(save_path, img)
-    return red_points
-def get_ball_trajectory_and_speed(video_path, release_frame, yolo_model, width, height,
-                                  shin_length, SHIN_LENGTH_M=0.4, VIDEO_FPS=120):
-    import numpy as np
-    import cv2
-    cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, release_frame)
-
-    red_points = []
-    first_pos = last_pos = None
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        results = yolo_model.predict(source=frame, conf=0.5, verbose=False) if yolo_model else []
-        ball_found = False
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                red_points.append((cx, cy))
-                if first_pos is None:
-                    first_pos = np.array([cx, cy])
-                last_pos = np.array([cx, cy])
-                ball_found = True
-                break
-        if not ball_found:
-            break
-
+        if results and hasattr(results[0], "boxes") and results[0].boxes:
+            best_box = max(results[0].boxes, key=lambda box: box.conf)
+            x1, y1, x2, y2 = map(int, best_box.xyxy[0])
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            tracked_positions.append((cx, cy))
+            ball_found = True
+        if not ball_found: break
     cap.release()
 
     speed_kph = None
-    if first_pos is not None and last_pos is not None and shin_length > 0:
-        pixel_dist = np.linalg.norm(last_pos - first_pos)
-        norm_dist = pixel_dist / shin_length
-        frame_delta = len(red_points) - 1
-        if frame_delta > 0:
-            distance_m = norm_dist * SHIN_LENGTH_M
-            time_s = frame_delta / VIDEO_FPS
-            speed_kph = (distance_m / time_s) * 3.6
-    return {
-        "trajectory": red_points,
-        "speed_kph": speed_kph
-    }
+    if len(tracked_positions) >= 2 and shin_length_pixels > 0:
+        first_pos = np.array(tracked_positions[0])
+        last_pos = np.array(tracked_positions[-1])
+        pixel_distance = np.linalg.norm(last_pos - first_pos)
+        real_distance_m = (pixel_distance / shin_length_pixels) * SHIN_LENGTH_M
+        time_s = (len(tracked_positions) - 1) / VIDEO_FPS
+        if time_s > 0:
+            speed_kph = (real_distance_m / time_s) * 3.6
+            
+    return {"trajectory": tracked_positions, "speed_kph": speed_kph}
 
-# --- 3. 각도/기울기 시각화 ---
 def calculate_angle(a, b, c):
+    """Calculates the angle between three points (in degrees)."""
     a, b, c = np.array(a), np.array(b), np.array(c)
-    ba = a - b
-    bc = c - b
-    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-    angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
-    return angle
+    ba, bc = a - b, c - b
+    denom = (np.linalg.norm(ba) * np.linalg.norm(bc))
+    if denom < 1e-9: return 0.0
+    cosine = np.dot(ba, bc) / denom
+    return float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
 
 def get_joint_angles(lm, width, height):
-    # 오른팔 (오른어깨-오른팔꿈치-오른손목)
-    shoulder = (int(lm[12].x * width), int(lm[12].y * height))
-    elbow = (int(lm[14].x * width), int(lm[14].y * height))
-    wrist = (int(lm[16].x * width), int(lm[16].y * height))
+    """
+    Extracts key joint angles (arm, leg) and torso tilt from landmarks.
+    """
+    P = lambda i: (int(lm[i].x * width), int(lm[i].y * height))
+    
+    # Right Arm Angle
+    shoulder, elbow, wrist = P(RIGHT_SHOULDER), P(RIGHT_ELBOW), P(RIGHT_WRIST)
     arm_angle = calculate_angle(shoulder, elbow, wrist)
 
-    # 왼다리 (왼엉덩이-왼무릎-왼발목)
-    left_hip = (int(lm[23].x * width), int(lm[23].y * height))
-    left_knee = (int(lm[25].x * width), int(lm[25].y * height))
-    left_ankle = (int(lm[27].x * width), int(lm[27].y * height))
+    # Left Leg Angle
+    left_hip, left_knee, left_ankle = P(LEFT_HIP), P(LEFT_KNEE), P(LEFT_ANKLE)
     leg_angle = calculate_angle(left_hip, left_knee, left_ankle)
 
-    # 상체 기울기: 어깨중심 ~ 골반중심 벡터
-    right_hip = (int(lm[24].x * width), int(lm[24].y * height))
-    left_shoulder = (int(lm[11].x * width), int(lm[11].y * height))
-    right_shoulder = (int(lm[12].x * width), int(lm[12].y * height))
-    pelvis_center = ((left_hip[0] + right_hip[0]) // 2, (left_hip[1] + right_hip[1]) // 2)
-    shoulder_center = ((left_shoulder[0] + right_shoulder[0]) // 2, (left_shoulder[1] + right_shoulder[1]) // 2)
+    # Torso Tilt
+    pelvis_center = ((P(LEFT_HIP)[0] + P(RIGHT_HIP)[0]) // 2, (P(LEFT_HIP)[1] + P(RIGHT_HIP)[1]) // 2)
+    shoulder_center = ((P(LEFT_SHOULDER)[0] + P(RIGHT_SHOULDER)[0]) // 2, (P(LEFT_SHOULDER)[1] + P(RIGHT_SHOULDER)[1]) // 2)
     vec = (pelvis_center[0] - shoulder_center[0], pelvis_center[1] - shoulder_center[1])
     tilt = math.degrees(math.atan2(vec[0], vec[1]))
 
     return {
-        "arm_angle": arm_angle,
-        "leg_angle": leg_angle,
-        "tilt": tilt,
-        "shoulder": shoulder,
-        "elbow": elbow,
-        "wrist": wrist,
-        "left_hip": left_hip,
-        "left_knee": left_knee,
-        "left_ankle": left_ankle,
-        "pelvis_center": pelvis_center,
-        "shoulder_center": shoulder_center
+        "arm_angle": arm_angle, "leg_angle": leg_angle, "tilt": tilt,
+        "shoulder": shoulder, "elbow": elbow, "wrist": wrist,
+        "left_hip": left_hip, "left_knee": left_knee, "left_ankle": left_ankle,
+        "pelvis_center": pelvis_center, "shoulder_center": shoulder_center
     }
 
-def get_hand_height(lm, width, height, SHIN_LENGTH_M=0.4):
-    ankle = (int(lm[27].x * width), int(lm[27].y * height))
-    wrist = (int(lm[16].x * width), int(lm[16].y * height))
-    knee = (int(lm[25].x * width), int(lm[25].y * height))
+def get_hand_height(lm, width, height, SHIN_LENGTH_M=0.45):
+    """
+    Calculates the normalized and real-world height of the hand relative to the ankle.
+    """
+    ankle = (int(lm[LEFT_ANKLE].x * width), int(lm[LEFT_ANKLE].y * height))
+    wrist = (int(lm[RIGHT_WRIST].x * width), int(lm[RIGHT_WRIST].y * height))
+    knee = (int(lm[LEFT_KNEE].x * width), int(lm[LEFT_KNEE].y * height))
+    
     shin_len = np.linalg.norm(np.array(knee) - np.array(ankle))
     dy = ankle[1] - wrist[1]
+    
     normalized_height = dy / shin_len if shin_len > 0 else None
     real_height = normalized_height * SHIN_LENGTH_M if normalized_height is not None else None
+    
     return {
-        "normalized_height": normalized_height,
-        "real_height": real_height,
-        "wrist": wrist,
-        "ankle": ankle,
-        "knee": knee
+        "normalized_height": normalized_height, "real_height": real_height,
+        "wrist": wrist, "ankle": ankle, "knee": knee
     }
 
-# --- 4. 평균폼 생성 및 유사도 분석 ---
-def extract_and_normalize_landmarks(frames, landmarks_list, used_ids, width, height):
+def compute_wrist_speed_series_smoothed(landmarks_list, width, height, fps, start_frame, end_frame,
+                                      window_radius=2, min_vis=0.5, wrist_idx=RIGHT_WRIST):
+    """
+    이동 평균 필터를 적용하여 노이즈가 적고 부드러운 손목 속도(px/s)를 계산합니다.
+    """
+    T = len(landmarks_list)
+    speed_pxps = np.full(T, np.nan, dtype=np.float64)
+
+    s_coord = max(0, start_frame - window_radius)
+    e_coord = min(T, end_frame + window_radius + 1)
+    
+    coords = [get_xy_px(landmarks_list, t, wrist_idx, width, height, min_vis=min_vis) for t in range(s_coord, e_coord)]
+    
+    diffs = [np.hypot(coords[i+1][0] - coords[i][0], coords[i+1][1] - coords[i][1]) if coords[i] and coords[i+1] else np.nan for i in range(len(coords)-1)]
+    
+    dt = 1.0 / float(fps)
+    s_speed = max(start_frame, window_radius)
+    e_speed = min(end_frame, T - 1 - window_radius)
+
+    for t in range(s_speed, e_speed + 1):
+        start_diff_idx = (t - window_radius) - s_coord
+        end_diff_idx = (t + window_radius) - s_coord
+        
+        segment = [diffs[i] for i in range(start_diff_idx, end_diff_idx) if i >= 0 and i < len(diffs) and not np.isnan(diffs[i])]
+
+        if segment:
+            speed_pxps[t] = float(np.mean(segment)) / dt
+            
+    return speed_pxps
+
+def compute_shoulder_angular_velocity_series(landmarks_list, width, height, fps, start_frame, end_frame, window_radius=2, min_vis=0.5, side='right'):
+    idxs = (RIGHT_SHOULDER, RIGHT_ELBOW, RIGHT_HIP) if side == 'right' else (LEFT_SHOULDER, LEFT_ELBOW, LEFT_HIP)
+    T = len(landmarks_list)
+    theta = np.full(T, np.nan)
+
+    s0, e0 = max(0, start_frame - window_radius), min(T - 1, end_frame + window_radius)
+    for t in range(s0, e0 + 1):
+        S, E, H = [get_xy_px(landmarks_list, t, i, width, height, min_vis) for i in idxs]
+        if S and E and H:
+            theta[t] = _angle_between_2d((E[0] - S[0], E[1] - S[1]), (H[0] - S[0], H[1] - S[1]))
+    
+    valid_indices = ~np.isnan(theta)
+    if np.any(valid_indices):
+        theta[valid_indices] = np.unwrap(theta[valid_indices])
+        
+    omega = np.full(T, np.nan)
+    dt = 1.0 / float(fps)
+    s, e = max(start_frame, window_radius), min(end_frame, T - 1 - window_radius)
+    
+    for t in range(s, e + 1):
+        vals = [(theta[t + j] - theta[t - j]) / (2.0 * j * dt) for j in range(1, window_radius + 1) if t+j < T and t-j >= 0 and not (np.isnan(theta[t+j]) or np.isnan(theta[t-j]))]
+        if vals: omega[t] = np.mean(vals)
+        
+    return omega, omega * (180.0 / math.pi)
+
+# =================================================================================
+# DTW and Similarity Functions
+# =================================================================================
+
+def extract_and_normalize_landmarks(landmarks_list, used_ids, width, height):
+    """
+    Extracts and normalizes specified landmarks relative to the hip center.
+    """
     normalized_landmarks = []
     for lm in landmarks_list:
-        if lm is None:
-            continue
-        center_x = (lm[23].x + lm[24].x) / 2
-        center_y = (lm[23].y + lm[24].y) / 2
+        if lm is None: continue
+        center_x = (lm[LEFT_HIP].x + lm[RIGHT_HIP].x) / 2
+        center_y = (lm[LEFT_HIP].y + lm[RIGHT_HIP].y) / 2
         frame_coords = []
         for idx in used_ids:
             norm_x = lm[idx].x - center_x
@@ -403,69 +410,341 @@ def extract_and_normalize_landmarks(frames, landmarks_list, used_ids, width, hei
     return np.array(normalized_landmarks)
 
 def get_phase_ranges(frame_list):
+    """Converts a list of key frames into a list of (start, end) tuples for each phase."""
     start, max_knee, fixed, release, follow = frame_list
-    return [
-        (start, max_knee),
-        (max_knee, fixed),
-        (fixed, release),
-        (release, follow),
-    ]
+    return [(start, max_knee), (max_knee, fixed), (fixed, release), (release, follow)]
 
-def generate_average_forms(video_paths, used_ids):
-    phase_sequences = {i: [] for i in range(1, 5)}
-    for path in video_paths:
-        result = analyze_video(path)
-        frame_list = result['frame_list']
-        landmarks_list = result['landmarks_list']
-        frames = result['frames']
-        width = result['width']
-        height = result['height']
-        norm_seq = extract_and_normalize_landmarks(frames, landmarks_list, used_ids, width, height)
-        phase_ranges = get_phase_ranges(frame_list)
-        for i, (start_f, end_f) in enumerate(phase_ranges, 1):
-            phase_seq = norm_seq[start_f:end_f]
-            phase_sequences[i].append(phase_seq)
-    avg_forms = {}
-    for phase_idx, seq_list in phase_sequences.items():
-        reference_seq = seq_list[0]
-        aligned_seqs = []
-        for seq in seq_list:
-            path = fastdtw(reference_seq, seq, dist=euclidean)[1]
-            aligned = [[] for _ in range(len(reference_seq))]
-            for ref_idx, tgt_idx in path:
-                aligned[ref_idx].append(seq[tgt_idx])
-            avg_seq = [np.mean(frames, axis=0) if frames else np.zeros(reference_seq.shape[1]) for frames in aligned]
-            aligned_seqs.append(np.array(avg_seq))
-        avg_forms[phase_idx] = np.mean(np.stack(aligned_seqs), axis=0)
-    return avg_forms
-
-def score_from_distance(dist, min_dist=0.2, max_dist=5):
-    if dist <= min_dist:
-        return 100.0
-    elif dist >= max_dist:
-        return 0.0
+def score_from_distance(dist, min_dist=0.0, max_dist=0.15):
+    """Converts DTW distance to a similarity score from 0 to 100."""
+    if dist <= min_dist: return 100.0
+    if dist >= max_dist: return 0.0
     return 100.0 * (1 - (dist - min_dist) / (max_dist - min_dist))
 
-def evaluate_against_average_form(test_video_path, average_forms, used_ids):
-    result = analyze_video(test_video_path)
-    frame_list = result['frame_list']
-    landmarks_list = result['landmarks_list']
-    frames = result['frames']
-    width = result['width']
-    height = result['height']
-    norm_seq = extract_and_normalize_landmarks(frames, landmarks_list, used_ids, width, height)
-    phase_ranges = get_phase_ranges(frame_list)
-    phase_scores = []
-    phase_distances = []
-    for i, (start_f, end_f) in enumerate(phase_ranges, 1):
-        test_phase_seq = norm_seq[start_f:end_f]
-        avg_seq = average_forms[i]
-        if len(test_phase_seq) == 0:
-            dist = np.inf
+def resample_to_reference_timeline(ref_seq: np.ndarray, test_seq: np.ndarray):
+    """Aligns a test sequence to a reference sequence's timeline using FastDTW."""
+    dtw_dist, path = fastdtw(ref_seq, test_seq, dist=euclidean)
+    N, D = ref_seq.shape
+    out, cnt = np.zeros((N, D), dtype=np.float32), np.zeros(N, dtype=np.int32)
+    
+    for i, j in path:
+        out[i] += test_seq[j]
+        cnt[i] += 1
+        
+    nz = cnt > 0
+    out[nz] /= cnt[nz, None]
+    
+    for i in range(N):
+        if cnt[i] == 0:
+            L, R = i - 1, i + 1
+            while L >= 0 and cnt[L] == 0: L -= 1
+            while R < N and cnt[R] == 0: R += 1
+            if L >= 0 and R < N: out[i] = 0.5 * (out[L] + out[R])
+            elif L >= 0: out[i] = out[L]
+            elif R < N: out[i] = out[R]
+            
+    per_frame_err = np.linalg.norm(ref_seq - out, axis=1) if len(out) else np.array([])
+    return out, dtw_dist, path, per_frame_err
+
+def evaluate_pair_with_dynamic_masks(reference_video: str, test_video: str, used_ids: List[int], yolo_model,
+                                     min_phase_len: int = 5, strict: bool = True):
+    """
+    Compares two analyzed videos phase by phase using DTW with dynamic joint masking.
+    """
+    ref = analyze_video(reference_video, yolo_model)
+    test = analyze_video(test_video, yolo_model)
+    ok_ref, info_ref = quick_phase_report(reference_video, ref, min_phase_len=min_phase_len)
+    ok_tst, info_tst = quick_phase_report(test_video, test, min_phase_len=min_phase_len)
+    if strict and (not ok_ref or not ok_tst):
+        raise PhaseSegmentationError(f"영상 분할 실패. REF: {info_ref.get('reason')} | TST: {info_tst.get('reason')}")
+
+    p_ref = get_phase_ranges(ref['frame_list'])
+    p_tst = get_phase_ranges(test['frame_list'])
+
+    def run_dtw_phase(res_ref, res_tst, start_end_ref, start_end_tst, include_wr: bool, include_an: bool):
+        ids_masked = masked_used_ids(used_ids, include_wr, include_an)
+        seq_ref = extract_and_normalize_landmarks(res_ref['landmarks_list'], ids_masked, res_ref['width'], res_ref['height'])
+        seq_tst = extract_and_normalize_landmarks(res_tst['landmarks_list'], ids_masked, res_tst['width'], res_tst['height'])
+        
+        s_ref, e_ref = start_end_ref
+        s_tst, e_tst = start_end_tst
+        
+        if s_ref is None or e_ref is None or s_tst is None or e_tst is None:
+             return float('inf'), 0
+
+        seg_ref = seq_ref[s_ref:e_ref]
+        seg_tst = seq_tst[s_tst:e_tst]
+
+        if len(seg_ref) == 0 or len(seg_tst) == 0: return float('inf'), 0
+        
+        _, dtw_dist, path, _ = resample_to_reference_timeline(seg_ref, seg_tst)
+        return float(dtw_dist) / max(1, len(path)), len(path)
+
+    phase_scores, phase_costs = [], []
+    masks = [(False, False), (False, False), (True, True), (True, True)]
+    
+    for i, (p_r, p_t) in enumerate(zip(p_ref, p_tst)):
+        if p_r[0] is None or p_r[1] is None or p_t[0] is None or p_t[1] is None:
+            score, cost = 0.0, float('inf')
         else:
-            dist, _ = fastdtw(avg_seq, test_phase_seq, dist=euclidean)
-        score = score_from_distance(dist)
+            cost, _ = run_dtw_phase(ref, test, p_r, p_t, *masks[i])
+            score = score_from_distance(cost) if math.isfinite(cost) else 0.0
         phase_scores.append(score)
-        phase_distances.append(dist)
-    worst_idx = np.argmin(phase_scores) + 1
-    return phase_scores, phase_distances, worst_idx
+        phase_costs.append(cost)
+
+    overall_score = np.mean([s for s in phase_scores if math.isfinite(s)]) if any(math.isfinite(s) for s in phase_scores) else 0.0
+    worst_phase_idx = np.argmin(phase_scores) + 1 if phase_scores and np.any(np.isfinite(phase_scores)) else None
+    
+    return phase_scores, phase_costs, overall_score, worst_phase_idx
+
+# =================================================================================
+# Utility and Helper Functions
+# =================================================================================
+
+def phase_sanity_check(frame_list, total_frames, min_phase_len=5):
+    """
+    analyze_video에서 찾은 주요 프레임 리스트가 유효한지 검사합니다.
+    (None 값 여부, 시간순 정렬 여부, 최소 길이 충족 여부 등)
+    """
+    names = ["start", "max_knee", "fixed", "release", "follow"]
+    info = {"frame_list": dict(zip(names, frame_list)), "lengths": {}}
+
+    if any(f is None for f in frame_list):
+        info["reason"] = "contains None"
+        return False, info
+
+    s, m, f, r, fo = frame_list
+
+    if not (0 <= s < m < f < r < fo <= total_frames):
+        info["reason"] = "non-monotonic or out-of-range"
+        return False, info
+
+    phases = [(s,m), (m,f), (f,r), (r,fo)]
+    for idx, (a,b) in enumerate(phases, 1):
+        info["lengths"][f"phase{idx}"] = b - a
+        if b - a < min_phase_len:
+            info["reason"] = f"phase{idx} too short (<{min_phase_len})"
+            return False, info
+
+    info["reason"] = "ok"
+    return True, info
+
+def quick_phase_report(video_path, analyze_result, min_phase_len=5):
+    """
+    phase_sanity_check를 호출하여 영상의 단계 분할 결과를 간단히 출력합니다.
+    """
+    total_frames = len(analyze_result['frames'])
+    frame_list = analyze_result['frame_list']
+    ok, info = phase_sanity_check(frame_list, total_frames, min_phase_len=min_phase_len)
+    if ok:
+        print(f"[분할 점검 OK] {video_path} | lengths: {info['lengths']}")
+    else:
+        print(f"[분할 점검 FAIL] {video_path} | reason: {info.get('reason')} | frames: {info['frame_list']}")
+    return ok, info
+
+def masked_used_ids(base_used_ids: List[int], include_wrists: bool, include_ankles: bool) -> List[int]:
+    s = set(base_used_ids)
+    if not include_wrists: s -= {LEFT_WRIST, RIGHT_WRIST}
+    if not include_ankles: s -= {LEFT_ANKLE, RIGHT_ANKLE}
+    return sorted(s)
+
+def get_xy_px(lm_list, frame_idx, idx, width, height, min_vis=0.5):
+    if not (0 <= frame_idx < len(lm_list)) or lm_list[frame_idx] is None: return None
+    p = lm_list[frame_idx][idx]
+    if getattr(p, "visibility", 1.0) < min_vis: return None
+    return (float(p.x * width), float(p.y * height))
+
+def _angle_between_2d(u, v):
+    return math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1])
+
+def shin_len_px_at(lms, W, H, frame_idx):
+    if isinstance(lms, list):
+        a = get_xy_px(lms, frame_idx, LEFT_KNEE, W, H)
+        b = get_xy_px(lms, frame_idx, LEFT_ANKLE, W, H)
+    else: # Handle single landmark object
+        a = (lms[LEFT_KNEE].x * W, lms[LEFT_KNEE].y * H)
+        b = (lms[LEFT_ANKLE].x * W, lms[LEFT_ANKLE].y * H)
+    if a and b: return math.hypot(a[0] - b[0], a[1] - b[1])
+    return None
+
+def render_release_allinone(result, save_path, shin_length_m=0.45):
+    """
+    Generates a single image of the release frame with key metrics overlaid.
+    This is a utility function for creating visual reports.
+    """
+    rf = result['release_frame']
+    if rf is None: raise RuntimeError("릴리스 프레임을 찾지 못했습니다.")
+    
+    frame = result['frames'][rf].copy()
+    lm = result['landmarks_list'][rf]
+    W, H = result['width'], result['height']
+    
+    if lm is None: raise RuntimeError("릴리스 프레임에서 포즈 랜드마크가 없습니다.")
+
+    obstacles = []
+    placed_rects = []
+
+    P = lambda i: (int(lm[i].x * W), int(lm[i].y * H))
+
+    # --- Calculations --_
+    angles = get_joint_angles(lm, W, H)
+    height_info = get_hand_height(lm, W, H, shin_length_m)
+    
+    # --- Drawing ---
+    draw_hand_L_path(frame, height_info['ankle'], height_info['wrist'], (0, 0, 255), obstacles)
+    draw_angle_lines(frame, angles['shoulder'], angles['elbow'], angles['wrist'], (0, 165, 255), obstacles)
+    draw_angle_lines(frame, angles['left_hip'], angles['left_knee'], angles['left_ankle'], (0, 255, 0), obstacles)
+    draw_torso_line(frame, angles['shoulder_center'], angles['pelvis_center'], (255, 0, 255), 6, obstacles)
+
+    # --- Callouts ---
+    side_elbow = 'right' if angles['elbow'][0] < W * 0.5 else 'left'
+    side_knee = 'right' if angles['left_knee'][0] < W * 0.5 else 'left'
+    side_shoulder = 'right' if angles['shoulder_center'][0] < W * 0.5 else 'left'
+    side_wrist = 'right' if angles['wrist'][0] < W * 0.5 else 'left'
+
+    draw_callout_elbow_avoid_axes_pref(
+        frame, angles['elbow'], f"Right Arm: {angles['arm_angle']:.1f} deg",
+        side=side_elbow, tcolor=(0, 165, 255),
+        placed_rects=placed_rects, avoid_rects=obstacles,
+        base_ext=260, max_ext=660, gap=12)
+
+    draw_callout_elbow_avoid_axes_pref(
+        frame, angles['left_knee'], f"Left Knee: {angles['leg_angle']:.1f} deg",
+        side=side_knee, tcolor=(0, 255, 0),
+        placed_rects=placed_rects, avoid_rects=obstacles,
+        base_ext=260, max_ext=660, gap=12)
+
+    draw_callout_elbow_avoid_axes_pref(
+        frame, angles['shoulder_center'], f"Tilt: {angles['tilt']:.1f} deg",
+        side=side_shoulder, tcolor=(255, 0, 255),
+        placed_rects=placed_rects, avoid_rects=obstacles,
+        base_ext=280, max_ext=700, gap=12)
+
+    if height_info['real_height'] is not None:
+        draw_callout_elbow_avoid_axes_pref(
+            frame, angles['wrist'], f"Hand: {height_info['real_height']:.2f} m",
+            side=side_wrist, tcolor=(0, 0, 255),
+            placed_rects=placed_rects, avoid_rects=obstacles,
+            base_ext=280, max_ext=700, gap=12)
+
+    cv2.circle(frame, height_info['ankle'], 7, (0, 0, 255), -1, cv2.LINE_AA)
+    cv2.circle(frame, angles['wrist'], 7, (0, 0, 255), -1, cv2.LINE_AA)
+
+    cv2.imwrite(save_path, frame)
+    
+    return {
+        "release_frame": rf,
+        "right_arm_angle_deg": round(angles['arm_angle'], 1),
+        "left_knee_angle_deg": round(angles['leg_angle'], 1),
+        "torso_tilt_deg": round(angles['tilt'], 1),
+        "hand_height_m": None if height_info['real_height'] is None else round(float(height_info['real_height']), 3),
+        "saved_image_path": save_path
+    }
+
+# --- Drawing and Overlay Helper Functions ---
+def _rects_overlap(a, b, margin=6):
+    ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
+    ax1 -= margin; ay1 -= margin; ax2 += margin; ay2 += margin
+    bx1 -= margin; by1 -= margin; bx2 += margin; by2 += margin
+    return not (ax2 < bx1 or bx2 < ax1 or ay2 < by1 or by2 < ay1)
+
+def _line_intersects_rect(p1, p2, rect, margin=4):
+    x1,y1,x2,y2 = rect
+    x1 -= margin; y1 -= margin; x2 += margin; y2 += margin
+    if x1 <= p1[0] <= x2 and y1 <= p1[1] <= y2: return True
+    if x1 <= p2[0] <= x2 and y1 <= p2[1] <= y2: return True
+    edges = [((x1,y1),(x2,y1)), ((x2,y1),(x2,y2)), ((x2,y2),(x1,y2)), ((x1,y2),(x1,y1))]
+    ccw = lambda p,q,r: (r[1]-p[1])*(q[0]-p[0]) > (q[1]-p[1])*(r[0]-p[0])
+    _seg_intersect = lambda a1, a2, b1, b2: (ccw(a1,b1,b2) != ccw(a2,b1,b2)) and (ccw(a1,a2,b1) != ccw(a1,a2,b2))
+    return any(_seg_intersect(p1,p2,q1,q2) for q1,q2 in edges)
+
+def _line_rect(p1, p2, margin=6):
+    x1,y1=p1; x2,y2=p2
+    x_min, x_max = (x1,x2) if x1<=x2 else (x2,x1)
+    y_min, y_max = (y1,y2) if y1<=y2 else (y2,y1)
+    return (x_min-margin, y_min-margin, x_max+margin, y_max+margin)
+
+def _circle_rect(center, r, margin=4):
+    x,y=center; rr=r+margin
+    return (x-rr, y-rr, x+rr, y+rr)
+
+def draw_callout_elbow_avoid_axes_pref(
+    img, anchor, text, side='right',
+    bend=12, base_ext=240, max_ext=640, step=40,
+    pad_axis=6, color=(255,255,255), tcolor=(0,0,0),
+    thick=2, font_scale=0.95, pad=10, gap=10,
+    placed_rects=None, avoid_rects=None
+):
+    if placed_rects is None: placed_rects=[]
+    if avoid_rects is None: avoid_rects=[]
+    H, W = img.shape[:2]
+    ax, ay = anchor
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick)
+
+    def make_layout(ext, vertical='above'):
+        sx = +1 if side == 'right' else -1
+        yoff = -bend if vertical == 'above' else +bend
+        p1 = (ax + sx*bend, ay + yoff)
+        p2 = (p1[0] + sx*ext, p1[1])
+        if side == 'right':
+            box_x = p2[0] + gap
+        else:
+            box_x = p2[0] - (tw + 2*pad) - gap
+        if vertical == 'above':
+            box_y = max(10, p2[1] - th - pad - 2)
+        else:
+            box_y = min(H - (th + 2*pad) - 10, p2[1] + 8)
+        rect = (box_x, box_y, box_x + tw + 2*pad, box_y + th + 2*pad)
+        return p1, p2, rect
+
+    def ok(p1, p2, rect):
+        x1,y1,x2r,y2r = rect
+        if x1 < 4 or x2r > W-4 or y1 < 4 or y2r > H-4: return False
+        for r in placed_rects + avoid_rects:
+            if _rects_overlap(rect, r): return False
+            if _line_intersects_rect((ax,ay), p1, r): return False
+            if _line_intersects_rect(p1, p2, r): return False
+        return True
+
+    chosen = None
+    for vertical in ('above','below'):
+        for ext in range(base_ext, max_ext+1, step):
+            p1, p2, rect = make_layout(ext, vertical)
+            if ok(p1, p2, rect):
+                chosen = (p1,p2,rect); break
+        if chosen: break
+    if not chosen:
+        p1, p2, rect = make_layout(base_ext, 'above')
+    else:
+        p1, p2, rect = chosen
+
+    cv2.line(img, (ax,ay), p1, (255,255,255), thick, cv2.LINE_AA)
+    cv2.line(img, p1, p2, (255,255,255), thick, cv2.LINE_AA)
+    cv2.rectangle(img, (rect[0],rect[1]), (rect[2],rect[3]), color, -1)
+    cv2.putText(img, text, (rect[0]+pad, rect[1]+th+pad-2),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, tcolor, thick, cv2.LINE_AA)
+
+    placed_rects.append(rect)
+    placed_rects += [_line_rect((ax,ay), p1, 6), _line_rect(p1, p2, 6)]
+    return rect
+
+def draw_angle_lines(img, a, b, c, color, obstacles):
+    for p in [a, b, c]: cv2.circle(img, p, 6, color, -1, cv2.LINE_AA)
+    cv2.line(img, a, b, color, 3, cv2.LINE_AA)
+    cv2.line(img, c, b, color, 3, cv2.LINE_AA)
+    obstacles += [_line_rect(a,b,8), _line_rect(c,b,8),
+                  _circle_rect(a,6), _circle_rect(b,6), _circle_rect(c,6)]
+
+def draw_torso_line(img, shoulder, pelvis, color, thick, obstacles):
+    cv2.line(img, shoulder, pelvis, color, thick, cv2.LINE_AA)
+    for p in [shoulder, pelvis]: cv2.circle(img, p, 7, color, -1, cv2.LINE_AA)
+    obstacles += [_line_rect(shoulder, pelvis, 10),
+                  _circle_rect(shoulder,7), _circle_rect(pelvis,7)]
+
+def draw_hand_L_path(img, ankle, wrist, color, obstacles):
+    mid = (wrist[0], ankle[1])
+    cv2.line(img, ankle, mid, color, 3, cv2.LINE_AA)
+    cv2.line(img, mid, wrist, color, 3, cv2.LINE_AA)
+    for p in [ankle, wrist]: cv2.circle(img, p, 7, color, -1, cv2.LINE_AA)
+    obstacles += [_line_rect(ankle, mid, 8), _line_rect(mid, wrist, 8),
+                  _circle_rect(ankle,7), _circle_rect(wrist,7)]
+    return mid

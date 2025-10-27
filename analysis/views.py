@@ -14,7 +14,7 @@ from .utils import (
     create_thumbnail_from_video,
     analyze_video, get_ball_trajectory_and_speed,
     get_joint_angles, get_hand_height,
-    generate_average_forms, evaluate_against_average_form
+    evaluate_pair_with_dynamic_masks, PhaseSegmentationError
 )
 
 # YOLO 모델 전역 로드 (최초 1회)
@@ -63,7 +63,6 @@ def upload_video(request):
     # --- Thumbnail Generation ---
     thumbnail_content = create_thumbnail_from_video(video_file)
     if thumbnail_content:
-        # Create a filename for the thumbnail
         thumbnail_name = f"{os.path.splitext(os.path.basename(video_obj.video_file.name))[0]}.jpg"
         video_obj.thumbnail.save(thumbnail_name, thumbnail_content, save=True)
 
@@ -96,20 +95,15 @@ def videos_list_api(request):
         return JsonResponse(result, safe=False)
     return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
 
-# ... (The rest of the views remain the same) ...
-
 @csrf_exempt
 def delete_video_api(request, video_id):
-    """Deletes a video and its analysis data."""
     if request.method != 'DELETE':
         return JsonResponse({'result': 'fail', 'reason': 'DELETE method only'}, status=405)
     
     try:
         video_obj = get_object_or_404(VideoAnalysis, id=video_id)
         video_name = video_obj.video_name or os.path.basename(video_obj.video_file.name)
-        
         video_obj.delete()
-        
         return JsonResponse({'result': 'success', 'message': f'Video "{video_name}" deleted successfully.'})
     except VideoAnalysis.DoesNotExist:
         return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
@@ -154,7 +148,7 @@ def analyze_video_api(request, video_id):
             import numpy as np
             shin_length = float(np.linalg.norm(np.array(knee_xy) - np.array(ankle_xy)))
             ball_speed_result = get_ball_trajectory_and_speed(
-                video_path, int(release_frame), yolo_model, int(width), int(height), shin_length
+                video_path, int(release_frame), yolo_model, shin_length
             )
             video_obj.ball_speed = ball_speed_result
 
@@ -175,6 +169,7 @@ def analyze_video_api(request, video_id):
                     for l in frame_lm
                 ])
         video_obj.skeleton_coords = skeleton_coords_result
+        #video_obj.landmarks_list = result['landmarks_list'] # This might be large, consider if needed
         video_obj.save()
 
         return JsonResponse({
@@ -215,37 +210,50 @@ def release_angle_height_api(request, video_id):
 def dtw_similarity_api(request):
     if request.method == 'POST':
         data = json.loads(request.body)
-        average_ids = data.get('average_ids')
+        reference_id = data.get('reference_id')
         test_id = data.get('test_id')
-        used_ids = data.get('used_ids', [11, 12, 14, 16, 23, 24, 25])
-        if not (average_ids and test_id):
-            return JsonResponse({'result': 'fail', 'reason': '필수 정보 누락'}, status=400)
+        used_ids = data.get('used_ids', [11, 12, 14, 16, 23, 24, 25, 27])
+
+        if not (reference_id and test_id):
+            return JsonResponse({'result': 'fail', 'reason': 'reference_id와 test_id는 필수 정보입니다.'}, status=400)
         
         try:
-            avg_objs = VideoAnalysis.objects.filter(id__in=average_ids)
-            if avg_objs.count() != len(average_ids):
-                return JsonResponse({'result': 'fail', 'reason': 'average_ids 중 일부가 DB에 없음'}, status=404)
-            test_obj = VideoAnalysis.objects.get(id=test_id)
+            ref_obj = get_object_or_404(VideoAnalysis, id=reference_id)
+            test_obj = get_object_or_404(VideoAnalysis, id=test_id)
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'ID가 DB에 없음'}, status=404)
-        
-        avg_paths = [obj.video_file.path for obj in avg_objs]
+
+        ref_path = ref_obj.video_file.path
         test_path = test_obj.video_file.path
 
-        for p in avg_paths + [test_path]:
-            if not os.path.exists(p):
-                return JsonResponse({'result': 'fail', 'reason': f'File not found: {p}'}, status=404)
-        
-        avg_forms = generate_average_forms(avg_paths, used_ids)
-        phase_scores, phase_distances, worst_idx = evaluate_against_average_form(test_path, avg_forms, used_ids)
+        if not os.path.exists(ref_path):
+            return JsonResponse({'result': 'fail', 'reason': f'File not found: {ref_path}'}, status=404)
+        if not os.path.exists(test_path):
+            return JsonResponse({'result': 'fail', 'reason': f'File not found: {test_path}'}, status=404)
+
+        try:
+            phase_scores, phase_distances, overall_score, worst_idx = evaluate_pair_with_dynamic_masks(
+                reference_video=ref_path,
+                test_video=test_path,
+                used_ids=used_ids,
+                yolo_model=yolo_model
+            )
+        except PhaseSegmentationError as e:
+            return JsonResponse({'result': 'fail', 'reason': f'영상 분할 실패: {e}'}, status=500)
+        except Exception as e:
+            return JsonResponse({'result': 'fail', 'reason': f'분석 중 오류 발생: {e}'}, status=500)
         
         return JsonResponse({
             'result': 'success',
-            'phase_scores': [float(x) for x in phase_scores],
-            'phase_distances': [float(x) for x in phase_distances],
-            'worst_phase': int(worst_idx),
+            'phase_scores': [float(s) for s in phase_scores],
+            'phase_distances': [float(d) for d in phase_distances],
+            'overall_score': float(overall_score),
+            'worst_phase': int(worst_idx) if worst_idx is not None else None,
         })
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
+
+
+# ... (rest of the file remains the same) ...
 
 @csrf_exempt
 def skeleton_coords_api(request, video_id):
@@ -338,7 +346,6 @@ def player_update_api(request, player_id):
         data = json.loads(request.body)
         player = get_object_or_404(Player, id=player_id)
         
-        # Update fields
         player.name = data.get('name', player.name)
         player.height = data.get('height', player.height)
         player.weight = data.get('weight', player.weight)
@@ -452,7 +459,6 @@ def player_season_stats_api(request, player_id):
                 defaults=valid_stats_data
             )
 
-            # Re-fetch stats to include all fields in the response
             all_stats = {f.name: getattr(stats, f.name) for f in PlayerStats._meta.get_fields() if not f.is_relation}
             all_stats.pop('id', None)
 

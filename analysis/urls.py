@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    upload_video, analyze_video_api, ball_speed_api, release_angle_height_api, 
+    upload_video, analyze_video_api, ball_speed_api, release_angle_height_api,
     dtw_similarity_api, skeleton_coords_api, videos_list_api, delete_video_api,
     players_list_api, player_detail_api, player_create_api, player_update_api, player_delete_api,
     player_season_stats_api
