@@ -262,6 +262,8 @@ def skeleton_coords_api(request, video_id):
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
             video_obj = get_object_or_404(VideoAnalysis, id=video_id)
+            if video_obj.skeleton_coords == None:
+                return JsonResponse({'result': 'fail', 'reason': 'Skeleton coordinates not found'}, status=404)
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'skeleton_coords': video_obj.skeleton_coords})
@@ -271,6 +273,10 @@ def skeleton_coords_api(request, video_id):
 def players_list_api(request):
     if request.method == 'GET':
         players = Player.objects.all().order_by('name')
+        # 현재 시스템 년도에 속한 시즌의 선수의 팀명도 함께 반환
+        team_name = PlayerSeason.objects.filter(year=datetime.now().year).values_list('team','player_id')
+        print(team_name)
+
         players_data = [
             {
                 'id': str(player.id),
@@ -280,7 +286,8 @@ def players_list_api(request):
                 'weight': player.weight,
                 'throwing_hand': player.throwing_hand,
                 'batting_hand': player.batting_hand,
-                'video_count': player.videos.count()
+                'video_count': player.videos.count(),
+                'team_name': team_name.filter(player_id=player.id).first()[0] if team_name.filter(player_id=player.id).first() else None
             }
             for player in players
         ]
@@ -291,6 +298,7 @@ def players_list_api(request):
 def player_detail_api(request, player_id):
     if request.method == 'GET':
         player = get_object_or_404(Player, id=player_id)
+        team_name = PlayerSeason.objects.filter(player_id=player_id, year=datetime.now().year).values_list('team', flat=True).first()
         player_data = {
             'id': str(player.id),
             'name': player.name,
@@ -299,7 +307,8 @@ def player_detail_api(request, player_id):
             'weight': player.weight,
             'throwing_hand': player.throwing_hand,
             'batting_hand': player.batting_hand,
-            'video_count': player.videos.count()
+            'video_count': player.videos.count(),
+            'team_name': team_name if team_name else None
         }
         return JsonResponse(player_data)
     return JsonResponse({'result': 'fail', 'reason': 'GET method only'}, status=405)
@@ -345,7 +354,7 @@ def player_update_api(request, player_id):
     if request.method == 'PUT':
         data = json.loads(request.body)
         player = get_object_or_404(Player, id=player_id)
-        
+
         player.name = data.get('name', player.name)
         player.height = data.get('height', player.height)
         player.weight = data.get('weight', player.weight)

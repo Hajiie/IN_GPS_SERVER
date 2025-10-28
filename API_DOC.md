@@ -1,4 +1,4 @@
-# IN-GPS API 명세서 (v2.1)
+# IN-GPS API 명세서 (v2.2)
 
 ---
 
@@ -24,16 +24,17 @@
 - **응답**: `200 OK`
 ```json
 [
-  {
-    "id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
-    "name": "홍길동",
-    "birth_date": "1995-03-15",
-    "height": 185,
-    "weight": 85,
-    "throwing_hand": "R",
-    "batting_hand": "R",
-    "video_count": 3
-  }
+    {
+        "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
+        "name": "홍길동",
+        "birth_date": "1995-03-15",
+        "height": 185,
+        "weight": 85,
+        "throwing_hand": "R",
+        "batting_hand": "R",
+        "video_count": 0,
+        "team_name": "TestTeam"
+    },...
 ]
 ```
 
@@ -43,23 +44,23 @@
 - **요청 본문 (JSON)**:
 ```json
 {
-  "name": "이순신",
-  "birth_date": "1998-01-10",
-  "height": 180,
-  "weight": 88,
-  "throwing_hand": "L",
-  "batting_hand": "L"
+  "name": "홍길동",
+  "birth_date": "1995-03-15",
+  "height": 185,
+  "weight": 85,
+  "throwing_hand": "R",
+  "batting_hand": "R"
 }
 ```
 - **성공 응답**: `200 OK`
 ```json
 {
-  "result": "success",
-  "player": {
-    "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
-    "name": "이순신",
-    "birth_date": "1998-01-10"
-  }
+    "result": "success",
+    "player": {
+        "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
+        "name": "홍길동",
+        "birth_date": "1995-03-15"
+    }
 }
 ```
 
@@ -69,9 +70,15 @@
 - **응답**: `200 OK`
 ```json
 {
-  "id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
-  "name": "홍길동",
-  ...
+    "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
+    "name": "홍길동",
+    "birth_date": "1995-03-15",
+    "height": 185,
+    "weight": 85,
+    "throwing_hand": "R",
+    "batting_hand": "R",
+    "video_count": 0,
+    "team_name": "팀명"
 }
 ```
 
@@ -83,6 +90,20 @@
 { "weight": 90 }
 ```
 - **응답**: `200 OK` (수정된 선수의 전체 정보)
+```json
+{
+    "result": "success",
+    "player": {
+        "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
+        "name": "홍길동",
+        "birth_date": "1995-03-15",
+        "height": 185,
+        "weight": 90,
+        "throwing_hand": "R",
+        "batting_hand": "R"
+    }
+}
+```
 
 ### **선수 삭제**
 `DELETE /analysis/players/delete/<uuid:player_id>`
@@ -95,7 +116,7 @@
 ```json
 {
     "result": "fail",
-    "reason": "이 선수와 연결된 영상이 3개 있습니다. 영상을 먼저 삭제해주세요."
+    "reason": "이 선수와 연결된 영상이 1개 있습니다. 영상을 먼저 삭제해주세요."
 }
 ```
 
@@ -111,14 +132,28 @@
 - **응답**: `200 OK`
 ```json
 [
-  {
-    "season_id": 1,
-    "year": 2024,
-    "team": "Toss-AI 히어로즈",
-    "stats": {
-      "era": "3.55", "games": 25, "wins": 10, ...
-    }
-  }
+    {
+        "season_id": 1,
+        "year": 2024,
+        "team": "TestTeam",
+        "stats": {
+            "era": "3.55",
+            "games": 25,
+            "wins": 10,
+            "losses": 5,
+            "saves": 2,
+            "holds": 0,
+            "win_rate": "0.667",
+            "innings_pitched": "0.0",
+            "hits_allowed": 0,
+            "home_runs_allowed": 0,
+            "walks": 0,
+            "hit_by_pitch": 0,
+            "strikeouts": 150,
+            "runs_allowed": 0,
+            "earned_runs": 0
+        }
+    },...
 ]
 ```
 
@@ -128,11 +163,14 @@
 - **요청 본문 (JSON)**:
 ```json
 {
-  "year": 2024,
-  "team": "Toss-AI 히어로즈",
-  "era": "3.55",
-  "games": 25,
-  "wins": 10
+    "year": 2024,
+    "team": "TestTeam",
+    "era": "3.55",
+    "games": 25,
+    "wins": 10,
+    "losses": 5,
+    "saves": 2,
+    "strikeouts": 150
 }
 ```
 - **응답**: `200 OK`
@@ -141,7 +179,27 @@
     "result": "success",
     "season_created": true,
     "stats_created": true,
-    ...
+    "player_id": "8fab596a-ae0b-4342-b974-180e3f498029",
+    "season_id": 1,
+    "year": 2024,
+    "team": "TestTeam",
+    "stats": {
+        "era": "3.55",
+        "games": 25,
+        "wins": 10,
+        "losses": 5,
+        "saves": 2,
+        "holds": 0,
+        "win_rate": 0.6666666666666666,
+        "innings_pitched": "0.0",
+        "hits_allowed": 0,
+        "home_runs_allowed": 0,
+        "walks": 0,
+        "hit_by_pitch": 0,
+        "strikeouts": 150,
+        "runs_allowed": 0,
+        "earned_runs": 0
+    }
 }
 ```
 
@@ -220,11 +278,40 @@
 ```json
 {
     "result": "success",
-    "frame_list": [54, 122, 218, 228, 243],
-    "fixed_frame": 218,
-    "release_frame": 228,
-    "ball_speed": { ... },
-    "release_angle_height": { ... }
+    "frame_list": [51, 111, 220, 236, 251],
+    "fixed_frame": 220,
+    "release_frame": 236,
+    "ball_speed": {
+        "trajectory": [
+            [
+                1282,
+                339
+            ],...
+        ],
+        "speed_kph": 96.48510214059976
+    },
+    "release_angle_height": {
+        "angles": {
+            "arm_angle": 142.58744340070731,
+            "leg_angle": 125.38037670563261,
+            "tilt": -22.34810834790941,
+            "shoulder": [1118, 518],
+            "elbow": [1207, 486],
+            "wrist": [1256, 410],
+            "left_hip": [1021, 718],
+            "left_knee": [1114, 762],
+            "left_ankle": [1136, 886],
+            "pelvis_center": [1021, 716],
+            "shoulder_center": [1095, 536]
+        },
+        "hand_height": {
+            "normalized_height": 3.77968285998549,
+            "real_height": 1.7008572869934706,
+            "wrist": [1256, 410],
+            "ankle": [1136, 886],
+            "knee": [1114, 762]
+        }
+    }
 }
 ```
 
@@ -235,15 +322,74 @@
   - `POST /analysis/release_angle_height/<uuid:video_id>`
   - `POST /analysis/skeleton_coords/<uuid:video_id>`
 - **응답**: `200 OK` (각 엔드포인트별 상세 분석 결과)
+```json
+{
+  "result": "success",
+  "release_angle_height": {
+        "angles": {
+            "arm_angle": 142.58744340070731,
+            "leg_angle": 125.38037670563261,
+            "tilt": -22.34810834790941,
+            "shoulder": [1118, 518],
+            "elbow": [1207, 486],
+            "wrist": [1256, 410],
+            "left_hip": [1021, 718],
+            "left_knee": [1114, 762],
+            "left_ankle": [1136, 886],
+            "pelvis_center": [1021, 716],
+            "shoulder_center": [1095, 536]
+        },
+        "hand_height": {
+            "normalized_height": 3.77968285998549,
+            "real_height": 1.7008572869934706,
+            "wrist": [1256, 410],
+            "ankle": [1136, 886],
+            "knee": [1114, 762]
+        }
+    }
+}
+```
+공을 추적하는 순간 프레임부터 끝까지, 공의 속도 및 각 프레임에 대해 공의 x_pixel,y_pixel의 위치를 반환
+```json
+{
+  "result": "success",
+  "ball_speed": {
+        "trajectory": [
+            [
+                1282,
+                339
+            ],...
+        ],
+        "speed_kph": 96.48510214059976
+    }
+}
+```
+모든 프레임에 대한 33개의 랜드마크와 각 랜드마크별 `x`,`y`,`visibility`,`x_pixel`,`y_pixel`을 반환
+```json
+{
+    "result": "success",
+    "skeleton_coords": [
+        [
+            {
+                "x": 0.42583516240119934,
+                "y": 0.3370037376880646,
+                "visibility": 0.9986435770988464,
+                "x_pixel": 817,
+                "y_pixel": 363
+            },...
+        ],...
+    ]
+}
+```
 
 ### **DTW 유사도 분석**
 `POST /analysis/dtw_similarity`
-- **설명**: 여러 영상을 기준으로 평균 폼을 생성하고 테스트 영상과 유사도를 비교합니다.
-- **요청 본문 (JSON)**:
+- **설명**: 최적폼 영상을 기준으로 테스트 영상과 유사도를 비교합니다. `used_ids`는 비워도 되는 필드입니다.
+- **요청 본문 (JSON)**: 
 ```json
 {
-  "average_ids": ["uuid1", "uuid2", "uuid3", "uuid4", "uuid5"],
-  "test_id": "uuid6",
+  "reference_id": "3f817408-87a9-46d6-8051-82bde67b898d",
+  "test_id": "5b3d9135-9df1-4951-8a88-eaf543288767",
   "used_ids": [11, 12, 14, 16, 23, 24, 25] 
 }
 ```
@@ -251,8 +397,12 @@
 ```json
 {
     "result": "success",
-    "phase_scores": [82.8, 56.1, 4.8, 0.0],
-    "phase_distances": [1.02, 2.30, 4.76, 8.81],
+    "phase_scores": [87.94750010042343, 88.02798111679282, 86.16201109493117, 74.41059810364298],
+    "phase_distances": [
+      0.018078749849364858, 0.01795802832481077, 
+      0.020756983357603228, 0.038384102844535535
+    ],
+    "overall_score": 84.1370226039476,
     "worst_phase": 4
 }
 ```
