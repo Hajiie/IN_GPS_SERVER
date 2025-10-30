@@ -260,7 +260,7 @@ def analyze_video_api(request, video_id):
 
 @csrf_exempt
 def ball_speed_api(request, video_id):
-    if request.method == 'POST':
+    if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
@@ -268,11 +268,11 @@ def ball_speed_api(request, video_id):
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'ball_speed': video_obj.ball_speed})
-    return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
 
 @csrf_exempt
 def release_angle_height_api(request, video_id):
-    if request.method == 'POST':
+    if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
@@ -280,7 +280,7 @@ def release_angle_height_api(request, video_id):
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'release_angle_height': video_obj.release_angle_height})
-    return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
 
 @csrf_exempt
 def dtw_similarity_api(request):
@@ -333,7 +333,7 @@ def dtw_similarity_api(request):
 
 @csrf_exempt
 def skeleton_coords_api(request, video_id):
-    if request.method == 'POST':
+    if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
         try:
@@ -343,7 +343,7 @@ def skeleton_coords_api(request, video_id):
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
         return JsonResponse({'result': 'success', 'skeleton_coords': video_obj.skeleton_coords})
-    return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
 
 @csrf_exempt
 def players_list_api(request):
