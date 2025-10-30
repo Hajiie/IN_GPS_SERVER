@@ -265,6 +265,64 @@
 }
 ```
 
+### **영상 상세 조회**
+`GET /analysis/videos/<uuid:video_id>`
+- **설명**: 특정 영상의 상세 정보를 조회합니다.
+- **응답**: `200 OK`
+```json
+{
+    "result": "success",
+    "video_name": "test03_01",
+    "video_url": "/media/media/videos/사용자-지정-영상-이름.mp4",
+    "thumbnail_url": "/media/thumbnails/사용자-지정-영상-이름.jpg",
+    "upload_time": "2025-10-28T14:32:47.635134+00:00",
+    "player_id": "89688ec3-ae73-4598-9bb7-d6edc98d4bd7",
+    "player_name": "홍길동",
+    "ball_speed": {
+        "trajectory": [[1261, 320],...],
+        "speed_kph": 92.14018923830845
+    },
+    "release_frame": 226,
+    "width": 1920,
+    "height": 1080,
+    "release_frame_knee": [1095, 768],
+    "release_frame_ankle": [1143, 894],
+    "fixed_frame": 213,
+    "frame_list": [32, 99, 213, 226, 241],
+    "skeleton_video_url": "/media/skeleton_videos/사용자-지정-영상-이름_skeleton.mp4",
+    "release_angle_height": {
+        "angles": {
+            "arm_angle": 150.49521009982092,
+            "leg_angle": 143.0501919742916,
+            "tilt": -23.080617215343793,
+            "shoulder": [1107, 514],
+            "elbow": [1192, 468],
+            "wrist": [1239, 393],
+            "left_hip": [1014, 717],
+            "left_knee": [1095, 768],
+            "left_ankle": [1143, 894],
+            "pelvis_center": [1010, 709],
+            "shoulder_center": [1085, 533]
+        },
+        "hand_height": {
+            "normalized_height": 3.715701231741373,
+            "real_height": 1.6720655542836178,
+            "wrist": [1239, 393],
+            "ankle": [1143, 894],
+            "knee": [1095, 768]
+        }
+    },
+    "frame_metrics": [
+        {
+            "torso_tilt": -0.6127657222640064,
+            "elbow_angle": 30.809689973132183,
+            "knee_angle": 177.70802307090733,
+            "hand_height_m": 1.426872335668805
+        },...
+    ]
+}
+```
+
 ---
 
 ## 5. 분석 (Analysis)
@@ -318,9 +376,10 @@
 ### **분석 결과 개별 조회**
 - **설명**: `video_id`를 사용하여 특정 분석 결과를 조회합니다.
 - **엔드포인트**:
-  - `POST /analysis/ball_speed/<uuid:video_id>`
-  - `POST /analysis/release_angle_height/<uuid:video_id>`
-  - `POST /analysis/skeleton_coords/<uuid:video_id>`
+  - `GET /analysis/ball_speed/<uuid:video_id>`
+  - `GET /analysis/release_angle_height/<uuid:video_id>`
+  - `GET /analysis/skeleton_coords/<uuid:video_id>`
+  - `GET /analysis/frame_metrics/<uuid:video_id>`
 - **응답**: `200 OK` (각 엔드포인트별 상세 분석 결과)
 ```json
 {
@@ -378,6 +437,20 @@
                 "y_pixel": 363
             },...
         ],...
+    ]
+}
+```
+모든 프레임에 대한 몸 기울기, 팔꿈치 각도, 무릎 각도, 손 높이를 반환
+```json
+{
+    "result": "success",
+    "frame_metrics": [
+        {
+            "torso_tilt": -0.6127657222640064,
+            "elbow_angle": 30.809689973132183,
+            "knee_angle": 177.70802307090733,
+            "hand_height_m": 1.426872335668805
+        },...
     ]
 }
 ```
