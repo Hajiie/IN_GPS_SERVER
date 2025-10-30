@@ -96,6 +96,8 @@ class VideoAnalysis(models.Model):
     ball_speed = JSONField(null=True, blank=True)  # trajectory, speed_kph
     release_angle_height = JSONField(null=True, blank=True)  # angles, hand_height
     skeleton_coords = JSONField(null=True, blank=True)  # release_frame 기준 랜드마크 좌표
+    skeleton_video = models.FileField(upload_to='skeleton_videos/', null=True, blank=True)
+    frame_metrics = models.JSONField(null=True, blank=True)
 
     def __str__(self):
         return self.video_name or os.path.basename(self.video_file.name)
@@ -105,5 +107,7 @@ class VideoAnalysis(models.Model):
         self.video_file.delete(save=False)
         if self.thumbnail:
             self.thumbnail.delete(save=False)
+        if self.skeleton_video:
+            self.skeleton_video.delete(save=False)
         # Now, call the superclass method to delete the database record
         super().delete(*args, **kwargs)

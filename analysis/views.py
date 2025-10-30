@@ -14,7 +14,8 @@ from .utils import (
     create_thumbnail_from_video,
     analyze_video, get_ball_trajectory_and_speed,
     get_joint_angles, get_hand_height,
-    evaluate_pair_with_dynamic_masks, PhaseSegmentationError
+    evaluate_pair_with_dynamic_masks, PhaseSegmentationError,
+    render_skeleton_video, calculate_frame_by_frame_metrics
 )
 
 # YOLO 모델 전역 로드 (최초 1회)
@@ -111,6 +112,51 @@ def delete_video_api(request, video_id):
         return JsonResponse({'result': 'fail', 'reason': str(e)}, status=500)
 
 @csrf_exempt
+def video_detail_api(request, video_id):
+    if request.method == 'GET':
+        if not video_id:
+            return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
+        try:
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
+            return JsonResponse({
+                'result': 'success',
+                'video_name': video_obj.video_name,
+                'video_url': video_obj.video_file.url,
+                'thumbnail_url': video_obj.thumbnail.url if video_obj.thumbnail else None,
+                'upload_time': video_obj.upload_time.isoformat(),
+                'player_id': str(video_obj.player.id) if video_obj.player else None,
+                'player_name': video_obj.player.name if video_obj.player else None,
+                'ball_speed': video_obj.ball_speed,
+                'release_frame': video_obj.release_frame,
+                'width': video_obj.width,
+                'height': video_obj.height,
+                'release_frame_knee': video_obj.release_frame_knee,
+                'release_frame_ankle': video_obj.release_frame_ankle,
+                'fixed_frame': video_obj.fixed_frame,
+                'frame_list': video_obj.frame_list,
+                'skeleton_video_url': video_obj.skeleton_video.url if video_obj.skeleton_video else None,
+                'release_angle_height': video_obj.release_angle_height,
+                'frame_metrics': video_obj.frame_metrics
+            })
+        except VideoAnalysis.DoesNotExist:
+            return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
+
+@csrf_exempt
+def frame_metrics_api(request, video_id):
+    if request.method == 'GET':
+        if not video_id:
+            return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
+        try:
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
+            return JsonResponse({'result': 'success', 'frame_metrics': video_obj.frame_metrics})
+        except VideoAnalysis.DoesNotExist:
+            return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
+
+
+
+@csrf_exempt
 def analyze_video_api(request, video_id):
     if request.method == 'POST':
         if not video_id:
@@ -125,18 +171,18 @@ def analyze_video_api(request, video_id):
         if not os.path.exists(video_path):
             return JsonResponse({'result': 'fail', 'reason': f'File not found at path: {video_path}'}, status=404)
 
-        result = analyze_video(video_path, yolo_model=yolo_model)
-        release_frame = result['release_frame']
-        width = result['width']
-        height = result['height']
+        analysis_result = analyze_video(video_path, yolo_model=yolo_model)
+        release_frame = analysis_result['release_frame']
+        width = analysis_result['width']
+        height = analysis_result['height']
         knee_xy, ankle_xy, lm = None, None, None
-        if release_frame is not None and result['landmarks_list'][release_frame] is not None:
-            lm = result['landmarks_list'][release_frame]
+        if release_frame is not None and analysis_result['landmarks_list'][release_frame] is not None:
+            lm = analysis_result['landmarks_list'][release_frame]
             knee_xy = [int(lm[25].x * width), int(lm[25].y * height)]
             ankle_xy = [int(lm[27].x * width), int(lm[27].y * height)]
 
-        video_obj.frame_list = result['frame_list']
-        video_obj.fixed_frame = result['fixed_frame']
+        video_obj.frame_list = analysis_result['frame_list']
+        video_obj.fixed_frame = analysis_result['fixed_frame']
         video_obj.release_frame = release_frame
         video_obj.width = width
         video_obj.height = height
@@ -160,27 +206,57 @@ def analyze_video_api(request, video_id):
             video_obj.release_angle_height = release_angle_height_result
 
         skeleton_coords_result = []
-        for frame_lm in result['landmarks_list']:
+        for frame_lm in analysis_result['landmarks_list']:
             if frame_lm is None:
                 skeleton_coords_result.append(None)
             else:
                 skeleton_coords_result.append([
-                    {'x': float(l.x), 'y': float(l.y), 'visibility': float(l.visibility), 'x_pixel': int(l.x * width), 'y_pixel': int(l.y * height)}
+                    {'x': l.x, 'y': l.y, 'visibility': l.visibility, 'x_pixel': int(l.x * width), 'y_pixel': int(l.y * height)}
                     for l in frame_lm
                 ])
         video_obj.skeleton_coords = skeleton_coords_result
-        #video_obj.landmarks_list = result['landmarks_list'] # This might be large, consider if needed
+
+        # --- Calculate and Save Frame-by-Frame Metrics ---
+        frame_metrics = calculate_frame_by_frame_metrics(analysis_result)
+        video_obj.frame_metrics = frame_metrics
+
+        # --- Render and Save Skeleton Video ---
+        skeleton_video_url = None
+        try:
+            base_name = os.path.splitext(os.path.basename(video_obj.video_file.name))[0]
+            file_name = f'{base_name}_skeleton.mp4'
+            save_dir = os.path.join(settings.MEDIA_ROOT, 'skeleton_videos')
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, file_name)
+
+            if video_obj.skeleton_video and os.path.exists(video_obj.skeleton_video.path):
+                os.remove(video_obj.skeleton_video.path)
+
+            used_ids = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+            
+            rendered_path = render_skeleton_video(analysis_result, save_path, used_ids)
+            
+            if rendered_path:
+                video_obj.skeleton_video.name = os.path.join('skeleton_videos', file_name)
+                skeleton_video_url = video_obj.skeleton_video.url
+
+        except Exception as e:
+            print(f"Error rendering skeleton video: {e}")
+
         video_obj.save()
 
         return JsonResponse({
             'result': 'success',
-            'frame_list': result['frame_list'],
-            'fixed_frame': result['fixed_frame'],
+            'frame_list': analysis_result['frame_list'],
+            'fixed_frame': analysis_result['fixed_frame'],
             'release_frame': release_frame,
             'ball_speed': ball_speed_result,
             'release_angle_height': release_angle_height_result,
+            'skeleton_video_url': skeleton_video_url,
+            'frame_metrics': frame_metrics
         })
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
+
 
 @csrf_exempt
 def ball_speed_api(request, video_id):
@@ -273,9 +349,7 @@ def skeleton_coords_api(request, video_id):
 def players_list_api(request):
     if request.method == 'GET':
         players = Player.objects.all().order_by('name')
-        # 현재 시스템 년도에 속한 시즌의 선수의 팀명도 함께 반환
         team_name = PlayerSeason.objects.filter(year=datetime.now().year).values_list('team','player_id')
-        print(team_name)
 
         players_data = [
             {

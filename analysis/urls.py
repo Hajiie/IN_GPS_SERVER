@@ -3,7 +3,7 @@ from .views import (
     upload_video, analyze_video_api, ball_speed_api, release_angle_height_api,
     dtw_similarity_api, skeleton_coords_api, videos_list_api, delete_video_api,
     players_list_api, player_detail_api, player_create_api, player_update_api, player_delete_api,
-    player_season_stats_api
+    player_season_stats_api, video_detail_api, frame_metrics_api
 )
 
 urlpatterns = [
@@ -18,7 +18,9 @@ urlpatterns = [
     path('release_angle_height/<uuid:video_id>', release_angle_height_api, name='release_angle_height_api'),
     path('dtw_similarity', dtw_similarity_api, name='dtw_similarity_api'),
     path('skeleton_coords/<uuid:video_id>', skeleton_coords_api, name='skeleton_coords_api'),
-    
+    path('videos/<uuid:video_id>', video_detail_api, name='video_detail_api'),
+    path('frame_metrics/<uuid:video_id>',frame_metrics_api, name='frame_metrics_api'),
+
     # Player APIs
     path('players', players_list_api, name='players_list_api'),
     path('players/create', player_create_api, name='player_create_api'),

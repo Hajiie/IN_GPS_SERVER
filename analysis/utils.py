@@ -291,6 +291,7 @@ def get_joint_angles(lm, width, height):
     """
     Extracts key joint angles (arm, leg) and torso tilt from landmarks.
     """
+    if lm is None: return {}
     P = lambda i: (int(lm[i].x * width), int(lm[i].y * height))
     
     # Right Arm Angle
@@ -318,6 +319,7 @@ def get_hand_height(lm, width, height, SHIN_LENGTH_M=0.45):
     """
     Calculates the normalized and real-world height of the hand relative to the ankle.
     """
+    if lm is None: return {}
     ankle = (int(lm[LEFT_ANKLE].x * width), int(lm[LEFT_ANKLE].y * height))
     wrist = (int(lm[RIGHT_WRIST].x * width), int(lm[RIGHT_WRIST].y * height))
     knee = (int(lm[LEFT_KNEE].x * width), int(lm[LEFT_KNEE].y * height))
@@ -332,6 +334,37 @@ def get_hand_height(lm, width, height, SHIN_LENGTH_M=0.45):
         "normalized_height": normalized_height, "real_height": real_height,
         "wrist": wrist, "ankle": ankle, "knee": knee
     }
+
+def calculate_frame_by_frame_metrics(analysis_result: dict) -> List[Optional[Dict]]:
+    """
+    Calculates key metrics for each frame in the analysis result.
+    """
+    landmarks_list = analysis_result['landmarks_list']
+    width = analysis_result['width']
+    height = analysis_result['height']
+    
+    all_metrics = []
+    
+    for lm in landmarks_list:
+        if lm is None:
+            all_metrics.append(None)
+            continue
+            
+        try:
+            angles = get_joint_angles(lm, width, height)
+            height_info = get_hand_height(lm, width, height)
+            
+            frame_metrics = {
+                'torso_tilt': angles.get('tilt'),
+                'elbow_angle': angles.get('arm_angle'),
+                'knee_angle': angles.get('leg_angle'),
+                'hand_height_m': height_info.get('real_height')
+            }
+            all_metrics.append(frame_metrics)
+        except Exception:
+            all_metrics.append(None)
+            
+    return all_metrics
 
 def compute_wrist_speed_series_smoothed(landmarks_list, width, height, fps, start_frame, end_frame,
                                       window_radius=2, min_vis=0.5, wrist_idx=RIGHT_WRIST):
@@ -566,6 +599,112 @@ def shin_len_px_at(lms, W, H, frame_idx):
     if a and b: return math.hypot(a[0] - b[0], a[1] - b[1])
     return None
 
+# =================================================================================
+# Video and Image Rendering Functions
+# =================================================================================
+
+def draw_bones_diamond_batched(img, segments, color_main, width=12):
+    """
+    Draws thick, diamond-shaped lines for bones between two points.
+    """
+    if not segments:
+        return
+    off = width * 0.5
+    for p1, p2 in segments:
+        (x1, y1), (x2, y2) = p1, p2
+        vx, vy = (x2 - x1, y2 - y1)
+        L = math.hypot(vx, vy)
+        if L < 1e-6:
+            continue
+        nx, ny = (-vy / L, vx / L)
+        mx, my = ((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+        p_top = (int(round(mx + nx * off)), int(round(my + ny * off)))
+        p_bottom = (int(round(mx - nx * off)), int(round(my - ny * off)))
+        poly = np.array([[x1, y1], [p_top[0], p_top[1]],
+                         [x2, y2], [p_bottom[0], p_bottom[1]]], np.int32)
+        cv2.fillConvexPoly(img, poly, color_main)
+
+def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[int], fps: int = 30):
+    """
+    Renders a skeleton overlay video from analysis results and saves it to a file.
+    """
+    frames = analysis_result['frames']
+    lms_list = analysis_result['landmarks_list']
+    W, H = analysis_result['width'], analysis_result['height']
+    start, max_knee, fixed, release, follow = analysis_result['frame_list']
+
+    if start is None or follow is None:
+        print("Warning: Cannot render skeleton video due to incomplete phase segmentation.")
+        return None
+
+    phase_ranges = [
+        (start, max_knee, "Phase 1: Windup"),
+        (max_knee, fixed, "Phase 2: Stride"),
+        (fixed, release, "Phase 3: Release"),
+        (release, follow, "Phase 4: Follow-through")
+    ]
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(save_path, fourcc, fps, (W, H))
+
+    if not out.isOpened():
+        print(f"Error: Could not open video writer for path {save_path}")
+        return None
+
+    render_start_frame = start
+    render_end_frame = follow
+
+    for abs_t in range(render_start_frame, render_end_frame):
+        if not (0 <= abs_t < len(frames) and 0 <= abs_t < len(lms_list)):
+            continue
+        
+        frame = frames[abs_t].copy()
+        lm = lms_list[abs_t]
+
+        current_phase_label = ""
+        current_phase_idx = 0
+        for i, (ps, pe, label) in enumerate(phase_ranges, 1):
+            if ps is not None and pe is not None and ps <= abs_t < pe:
+                current_phase_label = label
+                current_phase_idx = i
+                break
+
+        if lm:
+            visible = set(used_ids)
+            if current_phase_idx in (1, 2):
+                visible -= {LEFT_WRIST, RIGHT_WRIST, LEFT_ANKLE, RIGHT_ANKLE}
+
+            for i in visible:
+                if 0 <= i < len(lm):
+                    x = int(lm[i].x * W)
+                    y = int(lm[i].y * H)
+                    cv2.circle(frame, (x, y), 6, (255, 255, 255), -1, cv2.LINE_AA)
+                    cv2.circle(frame, (x, y), 2, (0, 0, 0), 2, cv2.LINE_AA)
+
+            def segs(edges):
+                out_segs = []
+                for a, b in edges:
+                    if a in visible and b in visible and 0 <= a < len(lm) and 0 <= b < len(lm):
+                        ax, ay = int(lm[a].x * W), int(lm[a].y * H)
+                        bx, by = int(lm[b].x * W), int(lm[b].y * H)
+                        out_segs.append(((ax, ay), (bx, by)))
+                return out_segs
+
+            draw_bones_diamond_batched(frame, segs(LEFT_EDGES), (0, 255, 255), 12)
+            draw_bones_diamond_batched(frame, segs(RIGHT_EDGES), (0, 255, 0), 12)
+            draw_bones_diamond_batched(frame, segs(CENTER_EDGES), (238, 238, 238), 12)
+
+        if current_phase_label:
+            cv2.rectangle(frame, (20, 20), (450, 80), (255, 255, 255), -1)
+            cv2.putText(frame, current_phase_label, (30, 65),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3, cv2.LINE_AA)
+        
+        out.write(frame)
+
+    out.release()
+    print(f"Skeleton video saved to {save_path}")
+    return save_path
+
 def render_release_allinone(result, save_path, shin_length_m=0.45):
     """
     Generates a single image of the release frame with key metrics overlaid.
@@ -585,7 +724,7 @@ def render_release_allinone(result, save_path, shin_length_m=0.45):
 
     P = lambda i: (int(lm[i].x * W), int(lm[i].y * H))
 
-    # --- Calculations --_
+    # --- Calculations ---
     angles = get_joint_angles(lm, W, H)
     height_info = get_hand_height(lm, W, H, shin_length_m)
     
@@ -640,7 +779,6 @@ def render_release_allinone(result, save_path, shin_length_m=0.45):
         "saved_image_path": save_path
     }
 
-# --- Drawing and Overlay Helper Functions ---
 def _rects_overlap(a, b, margin=6):
     ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
     ax1 -= margin; ay1 -= margin; ax2 += margin; ay2 += margin
