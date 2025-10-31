@@ -27,6 +27,7 @@
     {
         "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
         "name": "홍길동",
+        "playerImg": "/media/player_images/선수UUID/선수이미지UUID.png",
         "birth_date": "1995-03-15",
         "height": 185,
         "weight": 85,
@@ -41,17 +42,15 @@
 ### **선수 등록**
 `POST /analysis/players/create`
 - **설명**: 새로운 선수를 등록합니다. `name`과 `birth_date`가 동일한 선수는 중복 등록할 수 없습니다.
-- **요청 본문 (JSON)**:
-```json
-{
-  "name": "홍길동",
-  "birth_date": "1995-03-15",
-  "height": 185,
-  "weight": 85,
-  "throwing_hand": "R",
-  "batting_hand": "R"
-}
-```
+- **요청 본문 (Multipart/Form-Data)**:
+  - `pimage` (File): 프로필 이미지 파일
+  - `simage` (File): 상세 이미지 파일
+  - `name` (String): 선수 이름
+  - `birth_date` (String): 선수 생년월일 (YYYY-MM-DD)
+  - `height` (Int): 선수 키
+  - `weight` (Int): 선수 체중
+  - `throwing_hand` (String): 피칭 시 사용하는 손
+  - `batting_hand` (String): 타격 시 사용하는 손
 - **성공 응답**: `200 OK`
 ```json
 {
@@ -72,6 +71,7 @@
 {
     "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
     "name": "홍길동",
+    "playerStandImg": "/media/player_standing_images/선수UUID/선수스탠딩이미지.png",
     "birth_date": "1995-03-15",
     "height": 185,
     "weight": 85,

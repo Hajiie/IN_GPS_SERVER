@@ -657,8 +657,12 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
     for abs_t in range(render_start_frame, render_end_frame):
         if not (0 <= abs_t < len(frames) and 0 <= abs_t < len(lms_list)):
             continue
-        
-        frame = frames[abs_t].copy()
+
+        #원본 영상 위에 스켈레톤 입히기
+        #frame = frames[abs_t].copy()
+
+        #검은 배경 위에 스켈레톤 입히기
+        frame = np.zeros((H, W, 3), dtype=np.uint8)
         lm = lms_list[abs_t]
 
         current_phase_label = ""
@@ -702,7 +706,7 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
         out.write(frame)
 
     out.release()
-    print(f"Skeleton video saved to {save_path}")
+    #print(f"Skeleton video saved to {save_path}")
     return save_path
 
 def render_release_allinone(result, save_path, shin_length_m=0.45):

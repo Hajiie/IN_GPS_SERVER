@@ -8,6 +8,7 @@ import json
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from django.core.files.base import ContentFile
 
 from .models import Player, PlayerSeason, PlayerStats, VideoAnalysis
 from .utils import (
@@ -52,7 +53,7 @@ def upload_video(request):
     try:
         video_obj = VideoAnalysis.objects.create(
             player=player,
-            video_name=video_name if video_name else None,
+            video_name=video_name if video_name else os.path.splitext(video_file.name)[0],
             video_file=video_file
         )
     except IntegrityError:
@@ -64,13 +65,13 @@ def upload_video(request):
     # --- Thumbnail Generation ---
     thumbnail_content = create_thumbnail_from_video(video_file)
     if thumbnail_content:
-        thumbnail_name = f"{os.path.splitext(os.path.basename(video_obj.video_file.name))[0]}.jpg"
-        video_obj.thumbnail.save(thumbnail_name, thumbnail_content, save=True)
+        # Let the model's upload_to handle the path and name
+        video_obj.thumbnail.save(f"{video_obj.id}.jpg", thumbnail_content, save=True)
 
     return JsonResponse({
         'result': 'success',
         'video_id': str(video_obj.id),
-        'video_name': video_obj.video_name or os.path.basename(video_obj.video_file.name),
+        'video_name': video_obj.video_name,
         'video_url': video_obj.video_file.url,
         'thumbnail_url': video_obj.thumbnail.url if video_obj.thumbnail else None,
         'player_id': str(player.id),
@@ -81,11 +82,13 @@ def upload_video(request):
 def videos_list_api(request):
     if request.method == 'GET':
         videos = VideoAnalysis.objects.all().order_by('-upload_time')
+        if videos is None:
+            return JsonResponse({'result': 'fail', 'reason': 'No videos found'}, status=404)
         result = [
             {
                 'id': str(v.id),
                 'video_name': v.video_name or os.path.basename(v.video_file.name),
-                'video_url': v.video_file.url,
+                'video_url': v.video_file.url if v.video_file else None,
                 'thumbnail_url': v.thumbnail.url if v.thumbnail else None,
                 'upload_time': v.upload_time.isoformat(),
                 'player_id': str(v.player.id) if v.player else None,
@@ -121,7 +124,7 @@ def video_detail_api(request, video_id):
             return JsonResponse({
                 'result': 'success',
                 'video_name': video_obj.video_name,
-                'video_url': video_obj.video_file.url,
+                'video_url': video_obj.video_file.url if video_obj.video_file else None,
                 'thumbnail_url': video_obj.thumbnail.url if video_obj.thumbnail else None,
                 'upload_time': video_obj.upload_time.isoformat(),
                 'player_id': str(video_obj.player.id) if video_obj.player else None,
@@ -153,8 +156,6 @@ def frame_metrics_api(request, video_id):
         except VideoAnalysis.DoesNotExist:
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
     return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
-
-
 
 @csrf_exempt
 def analyze_video_api(request, video_id):
@@ -216,28 +217,28 @@ def analyze_video_api(request, video_id):
                 ])
         video_obj.skeleton_coords = skeleton_coords_result
 
-        # --- Calculate and Save Frame-by-Frame Metrics ---
         frame_metrics = calculate_frame_by_frame_metrics(analysis_result)
         video_obj.frame_metrics = frame_metrics
 
-        # --- Render and Save Skeleton Video ---
         skeleton_video_url = None
         try:
-            base_name = os.path.splitext(os.path.basename(video_obj.video_file.name))[0]
-            file_name = f'{base_name}_skeleton.mp4'
-            save_dir = os.path.join(settings.MEDIA_ROOT, 'skeleton_videos')
-            os.makedirs(save_dir, exist_ok=True)
-            save_path = os.path.join(save_dir, file_name)
-
-            if video_obj.skeleton_video and os.path.exists(video_obj.skeleton_video.path):
-                os.remove(video_obj.skeleton_video.path)
+            # Create a temporary path for the rendered video
+            temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp')
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_skeleton.mp4")
 
             used_ids = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
             
-            rendered_path = render_skeleton_video(analysis_result, save_path, used_ids)
+            rendered_path = render_skeleton_video(analysis_result, temp_save_path, used_ids)
             
             if rendered_path:
-                video_obj.skeleton_video.name = os.path.join('skeleton_videos', file_name)
+                if video_obj.skeleton_video:
+                    video_obj.skeleton_video.delete(save=False) # Delete old file from storage
+
+                with open(rendered_path, 'rb') as f:
+                    video_obj.skeleton_video.save(os.path.basename(rendered_path), ContentFile(f.read()), save=False)
+                
+                os.remove(rendered_path) # Clean up temp file
                 skeleton_video_url = video_obj.skeleton_video.url
 
         except Exception as e:
@@ -256,7 +257,6 @@ def analyze_video_api(request, video_id):
             'frame_metrics': frame_metrics
         })
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
-
 
 @csrf_exempt
 def ball_speed_api(request, video_id):
@@ -328,9 +328,6 @@ def dtw_similarity_api(request):
         })
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
 
-
-# ... (rest of the file remains the same) ...
-
 @csrf_exempt
 def skeleton_coords_api(request, video_id):
     if request.method == 'GET':
@@ -342,7 +339,11 @@ def skeleton_coords_api(request, video_id):
                 return JsonResponse({'result': 'fail', 'reason': 'Skeleton coordinates not found'}, status=404)
         except (VideoAnalysis.DoesNotExist, ValueError):
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
-        return JsonResponse({'result': 'success', 'skeleton_coords': video_obj.skeleton_coords})
+        return JsonResponse({
+            'result': 'success',
+            'skeleton_video_url': video_obj.skeleton_video.url if video_obj.skeleton_video else None,
+            'skeleton_coords': video_obj.skeleton_coords
+        })
     return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
 
 @csrf_exempt
@@ -355,6 +356,7 @@ def players_list_api(request):
             {
                 'id': str(player.id),
                 'name': player.name,
+                'playerImg': player.playerImg.url if player.playerImg else None,
                 'birth_date': player.birth_date.isoformat() if player.birth_date else None,
                 'height': player.height,
                 'weight': player.weight,
@@ -376,6 +378,7 @@ def player_detail_api(request, player_id):
         player_data = {
             'id': str(player.id),
             'name': player.name,
+            'playerStandImg': player.playerStandImg.url if player.playerStandImg else None,
             'birth_date': player.birth_date.isoformat() if player.birth_date else None,
             'height': player.height,
             'weight': player.weight,
@@ -390,9 +393,11 @@ def player_detail_api(request, player_id):
 @csrf_exempt
 def player_create_api(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        name = data.get('name')
-        birth_date_str = data.get('birth_date')
+        name = request.POST.get('name')
+        playerImg = request.FILES.get('pimage')
+        playerStandingImg = request.FILES.get('simage')
+
+        birth_date_str = request.POST.get('birth_date')
         if not name:
             return JsonResponse({'result': 'fail', 'reason': '선수 이름을 입력해주세요'}, status=400)
         
@@ -409,8 +414,9 @@ def player_create_api(request):
         
         player = Player.objects.create(
             name=name, birth_date=birth_date,
-            height=data.get('height'), weight=data.get('weight'),
-            throwing_hand=data.get('throwing_hand'), batting_hand=data.get('batting_hand')
+            height=request.POST.get('height'), weight=request.POST.get('weight'),
+            throwing_hand=request.POST.get('throwing_hand'), batting_hand=request.POST.get('batting_hand'),
+            playerImg=playerImg, playerStandImg=playerStandingImg
         )
         
         return JsonResponse({

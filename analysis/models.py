@@ -5,22 +5,44 @@ from django.utils import timezone
 from django.db.models import JSONField
 from django.utils.text import slugify
 
-def get_video_upload_path(instance, filename):
-    """Dynamically sets the upload path and filename."""
+def player_image_upload_path(instance, filename):
     ext = filename.split('.')[-1]
-    if instance.video_name and instance.video_name.strip():
-        base_name = slugify(instance.video_name, allow_unicode=True)
-    else:
-        base_name = timezone.now().strftime('%Y-%m-%d_%H-%M-%S')
-    new_filename = f"{base_name}.{ext}"
-    return os.path.join('media/videos', new_filename)
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('player_images', str(instance.id), new_filename)
+
+def player_standing_image_upload_path(instance, filename):
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('player_standing_images', str(instance.id), new_filename)
+
+def video_upload_path(instance, filename):
+    player_id = str(instance.player.id) if instance.player else 'unknown_player'
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('videos', player_id, new_filename)
+
+get_video_upload_path = video_upload_path
+
+def thumbnail_upload_path(instance, filename):
+    player_id = str(instance.player.id) if instance.player else 'unknown_player'
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('thumbnails', player_id, new_filename)
+
+def skeleton_video_upload_path(instance, filename):
+    player_id = str(instance.player.id) if instance.player else 'unknown_player'
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('skeleton_videos', player_id, new_filename)
 
 class Player(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    playerImg = models.ImageField(upload_to=player_image_upload_path, null=True, blank=True)
+    playerStandImg = models.ImageField(upload_to=player_standing_image_upload_path, null=True, blank=True)
     name = models.CharField(max_length=100)
     birth_date = models.DateField(null=True, blank=True)
-    height = models.IntegerField(null=True, blank=True)  # cm
-    weight = models.IntegerField(null=True, blank=True)  # kg
+    height = models.IntegerField(null=True, blank=True)
+    weight = models.IntegerField(null=True, blank=True)
     throwing_hand = models.CharField(max_length=10, choices=[
         ('R', '우투'),
         ('L', '좌투'),
@@ -49,7 +71,6 @@ class PlayerSeason(models.Model):
 class PlayerStats(models.Model):
     player_season = models.OneToOneField(PlayerSeason, on_delete=models.CASCADE, related_name='stats')
     
-    # 기본 스탯
     era = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     games = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
@@ -58,23 +79,20 @@ class PlayerStats(models.Model):
     holds = models.IntegerField(default=0)
     win_rate = models.DecimalField(max_digits=5, decimal_places=3, null=True, blank=True)
     
-    # 투구 관련
-    innings_pitched = models.DecimalField(max_digits=5, decimal_places=1, default=0)  # IP
-    hits_allowed = models.IntegerField(default=0)  # H
-    home_runs_allowed = models.IntegerField(default=0)  # HR
-    walks = models.IntegerField(default=0)  # BB
-    hit_by_pitch = models.IntegerField(default=0)  # 사구
-    strikeouts = models.IntegerField(default=0)  # 삼진
+    innings_pitched = models.DecimalField(max_digits=5, decimal_places=1, default=0)
+    hits_allowed = models.IntegerField(default=0)
+    home_runs_allowed = models.IntegerField(default=0)
+    walks = models.IntegerField(default=0)
+    hit_by_pitch = models.IntegerField(default=0)
+    strikeouts = models.IntegerField(default=0)
     
-    # 실점 관련
-    runs_allowed = models.IntegerField(default=0)  # 실점
-    earned_runs = models.IntegerField(default=0)  # 자책점
+    runs_allowed = models.IntegerField(default=0)
+    earned_runs = models.IntegerField(default=0)
     
     def __str__(self):
         return f"{self.player_season} - ERA: {self.era}"
     
     def save(self, *args, **kwargs):
-        # 승률 자동 계산
         if self.wins + self.losses > 0:
             self.win_rate = self.wins / (self.wins + self.losses)
         super().save(*args, **kwargs)
@@ -83,8 +101,8 @@ class VideoAnalysis(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     player = models.ForeignKey(Player, on_delete=models.CASCADE, null=True, blank=True, related_name='videos')
     video_name = models.CharField(max_length=255, null=True, blank=True, unique=True)
-    video_file = models.FileField(upload_to=get_video_upload_path, max_length=255)
-    thumbnail = models.ImageField(upload_to='thumbnails/', null=True, blank=True)
+    video_file = models.FileField(upload_to=video_upload_path, max_length=255)
+    thumbnail = models.ImageField(upload_to=thumbnail_upload_path, null=True, blank=True)
     upload_time = models.DateTimeField(default=timezone.now)
     frame_list = JSONField(null=True, blank=True)
     fixed_frame = models.IntegerField(null=True, blank=True)
@@ -93,21 +111,19 @@ class VideoAnalysis(models.Model):
     height = models.IntegerField(null=True, blank=True)
     release_frame_knee = JSONField(null=True, blank=True)
     release_frame_ankle = JSONField(null=True, blank=True)
-    ball_speed = JSONField(null=True, blank=True)  # trajectory, speed_kph
-    release_angle_height = JSONField(null=True, blank=True)  # angles, hand_height
-    skeleton_coords = JSONField(null=True, blank=True)  # release_frame 기준 랜드마크 좌표
-    skeleton_video = models.FileField(upload_to='skeleton_videos/', null=True, blank=True)
-    frame_metrics = models.JSONField(null=True, blank=True)
+    ball_speed = JSONField(null=True, blank=True)
+    release_angle_height = JSONField(null=True, blank=True)
+    skeleton_coords = JSONField(null=True, blank=True)
+    skeleton_video = models.FileField(upload_to=skeleton_video_upload_path, null=True, blank=True)
+    frame_metrics = JSONField(null=True, blank=True)
 
     def __str__(self):
         return self.video_name or os.path.basename(self.video_file.name)
 
     def delete(self, *args, **kwargs):
-        # First, delete the video file and thumbnail from storage
         self.video_file.delete(save=False)
         if self.thumbnail:
             self.thumbnail.delete(save=False)
         if self.skeleton_video:
             self.skeleton_video.delete(save=False)
-        # Now, call the superclass method to delete the database record
         super().delete(*args, **kwargs)
