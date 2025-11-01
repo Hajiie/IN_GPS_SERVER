@@ -34,7 +34,9 @@
         "throwing_hand": "R",
         "batting_hand": "R",
         "video_count": 0,
-        "team_name": "TestTeam"
+        "team_name": "TestTeam",
+        "join_year": 2021,
+        "career_stats": "XX초-OO중-AA고"
     },...
 ]
 ```
@@ -78,7 +80,9 @@
     "throwing_hand": "R",
     "batting_hand": "R",
     "video_count": 0,
-    "team_name": "팀명"
+    "team_name": "팀명",
+    "join_year": 2021,
+    "career_stats": "XX초-OO중-AA고"
 }
 ```
 
