@@ -224,3 +224,4 @@ secrets.json
 *.tar.gz
 *.rar
 *.7z
+/analysis/migrations/
