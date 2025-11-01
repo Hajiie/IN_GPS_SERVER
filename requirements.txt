@@ -1,5 +1,5 @@
 # Core Django Framework
-Django>=5.2.0
+Django
 
 # Environment variables
 python-decouple>=3.8
