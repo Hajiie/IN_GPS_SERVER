@@ -19,7 +19,7 @@ urlpatterns = [
     path('dtw_similarity', dtw_similarity_api, name='dtw_similarity_api'),
     path('skeleton_coords/<uuid:video_id>', skeleton_coords_api, name='skeleton_coords_api'),
     path('videos/<uuid:video_id>', video_detail_api, name='video_detail_api'),
-    path('frame_metrics/<uuid:video_id>',frame_metrics_api, name='frame_metrics_api'),
+    path('frame_metrics/<uuid:video_id>', frame_metrics_api, name='frame_metrics_api'),
 
     # Player APIs
     path('players', players_list_api, name='players_list_api'),

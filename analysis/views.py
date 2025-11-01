@@ -32,8 +32,12 @@ def upload_video(request):
     if request.method != 'POST' or not request.FILES.get('video'):
         return JsonResponse({'result': 'fail', 'reason': '올바르지 않은 요청입니다.'}, status=400)
 
-    video_file = request.FILES['video']
+    # 파일 업로드 시 영상의 이름이 중복되면 return
+    if request.POST.get('video_name') in [v.video_name for v in VideoAnalysis.objects.all()]:
+        return JsonResponse({'result': 'fail', 'reason': '이미 사용 중인 영상 이름입니다.'}, status=409)
+
     video_name = request.POST.get('video_name')
+    video_file = request.FILES['video']
     player_name = request.POST.get('player_name')
     birth_date = request.POST.get('birth_date')
 
@@ -56,11 +60,9 @@ def upload_video(request):
             video_name=video_name if video_name else os.path.splitext(video_file.name)[0],
             video_file=video_file
         )
-    except IntegrityError:
-        return JsonResponse({
-            'result': 'fail',
-            'reason': f'이미 사용 중인 영상 이름입니다: "{video_name}"'
-        }, status=409)
+    except e:
+        return JsonResponse({'result': 'fail', 'reason': str(e)}, status=500)
+
 
     # --- Thumbnail Generation ---
     thumbnail_content = create_thumbnail_from_video(video_file)
@@ -385,7 +387,9 @@ def player_detail_api(request, player_id):
             'throwing_hand': player.throwing_hand,
             'batting_hand': player.batting_hand,
             'video_count': player.videos.count(),
-            'team_name': team_name if team_name else None
+            'team_name': team_name if team_name else None,
+            'join_year': player.join_year,
+            'career_stats': player.career_stats
         }
         return JsonResponse(player_data)
     return JsonResponse({'result': 'fail', 'reason': 'GET method only'}, status=405)
@@ -416,7 +420,8 @@ def player_create_api(request):
             name=name, birth_date=birth_date,
             height=request.POST.get('height'), weight=request.POST.get('weight'),
             throwing_hand=request.POST.get('throwing_hand'), batting_hand=request.POST.get('batting_hand'),
-            playerImg=playerImg, playerStandImg=playerStandingImg
+            playerImg=playerImg, playerStandImg=playerStandingImg, join_year=request.POST.get("join_year"),
+            career_stats=request.POST.get("career_stats"),
         )
         
         return JsonResponse({

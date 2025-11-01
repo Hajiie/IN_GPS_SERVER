@@ -193,7 +193,7 @@ def analyze_video(video_path, yolo_model):
                 last_hip_y_pix = hip_y_pix
             else:
                 hip_y_pix = last_hip_y_pix
-            
+
             WAIST_MARGIN = max(4, int(0.01 * height))
 
             results = yolo_model.predict(source=frame, conf=0.2, verbose=False)
@@ -248,9 +248,9 @@ def get_ball_trajectory_and_speed(video_path, release_frame, yolo_model, shin_le
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened(): return {"trajectory": [], "speed_kph": None}
-    
+
     cap.set(cv2.CAP_PROP_POS_FRAMES, release_frame)
-    
+
     tracked_positions = []
     while True:
         ret, frame = cap.read()
@@ -275,7 +275,7 @@ def get_ball_trajectory_and_speed(video_path, release_frame, yolo_model, shin_le
         time_s = (len(tracked_positions) - 1) / VIDEO_FPS
         if time_s > 0:
             speed_kph = (real_distance_m / time_s) * 3.6
-            
+
     return {"trajectory": tracked_positions, "speed_kph": speed_kph}
 
 def calculate_angle(a, b, c):
@@ -293,7 +293,7 @@ def get_joint_angles(lm, width, height):
     """
     if lm is None: return {}
     P = lambda i: (int(lm[i].x * width), int(lm[i].y * height))
-    
+
     # Right Arm Angle
     shoulder, elbow, wrist = P(RIGHT_SHOULDER), P(RIGHT_ELBOW), P(RIGHT_WRIST)
     arm_angle = calculate_angle(shoulder, elbow, wrist)
@@ -323,13 +323,13 @@ def get_hand_height(lm, width, height, SHIN_LENGTH_M=0.45):
     ankle = (int(lm[LEFT_ANKLE].x * width), int(lm[LEFT_ANKLE].y * height))
     wrist = (int(lm[RIGHT_WRIST].x * width), int(lm[RIGHT_WRIST].y * height))
     knee = (int(lm[LEFT_KNEE].x * width), int(lm[LEFT_KNEE].y * height))
-    
+
     shin_len = np.linalg.norm(np.array(knee) - np.array(ankle))
     dy = ankle[1] - wrist[1]
-    
+
     normalized_height = dy / shin_len if shin_len > 0 else None
     real_height = normalized_height * SHIN_LENGTH_M if normalized_height is not None else None
-    
+
     return {
         "normalized_height": normalized_height, "real_height": real_height,
         "wrist": wrist, "ankle": ankle, "knee": knee
@@ -342,18 +342,18 @@ def calculate_frame_by_frame_metrics(analysis_result: dict) -> List[Optional[Dic
     landmarks_list = analysis_result['landmarks_list']
     width = analysis_result['width']
     height = analysis_result['height']
-    
+
     all_metrics = []
-    
+
     for lm in landmarks_list:
         if lm is None:
             all_metrics.append(None)
             continue
-            
+
         try:
             angles = get_joint_angles(lm, width, height)
             height_info = get_hand_height(lm, width, height)
-            
+
             frame_metrics = {
                 'torso_tilt': angles.get('tilt'),
                 'elbow_angle': angles.get('arm_angle'),
@@ -363,7 +363,7 @@ def calculate_frame_by_frame_metrics(analysis_result: dict) -> List[Optional[Dic
             all_metrics.append(frame_metrics)
         except Exception:
             all_metrics.append(None)
-            
+
     return all_metrics
 
 def compute_wrist_speed_series_smoothed(landmarks_list, width, height, fps, start_frame, end_frame,
@@ -376,11 +376,11 @@ def compute_wrist_speed_series_smoothed(landmarks_list, width, height, fps, star
 
     s_coord = max(0, start_frame - window_radius)
     e_coord = min(T, end_frame + window_radius + 1)
-    
+
     coords = [get_xy_px(landmarks_list, t, wrist_idx, width, height, min_vis=min_vis) for t in range(s_coord, e_coord)]
-    
+
     diffs = [np.hypot(coords[i+1][0] - coords[i][0], coords[i+1][1] - coords[i][1]) if coords[i] and coords[i+1] else np.nan for i in range(len(coords)-1)]
-    
+
     dt = 1.0 / float(fps)
     s_speed = max(start_frame, window_radius)
     e_speed = min(end_frame, T - 1 - window_radius)
@@ -388,12 +388,12 @@ def compute_wrist_speed_series_smoothed(landmarks_list, width, height, fps, star
     for t in range(s_speed, e_speed + 1):
         start_diff_idx = (t - window_radius) - s_coord
         end_diff_idx = (t + window_radius) - s_coord
-        
+
         segment = [diffs[i] for i in range(start_diff_idx, end_diff_idx) if i >= 0 and i < len(diffs) and not np.isnan(diffs[i])]
 
         if segment:
             speed_pxps[t] = float(np.mean(segment)) / dt
-            
+
     return speed_pxps
 
 def compute_shoulder_angular_velocity_series(landmarks_list, width, height, fps, start_frame, end_frame, window_radius=2, min_vis=0.5, side='right'):
@@ -406,19 +406,19 @@ def compute_shoulder_angular_velocity_series(landmarks_list, width, height, fps,
         S, E, H = [get_xy_px(landmarks_list, t, i, width, height, min_vis) for i in idxs]
         if S and E and H:
             theta[t] = _angle_between_2d((E[0] - S[0], E[1] - S[1]), (H[0] - S[0], H[1] - S[1]))
-    
+
     valid_indices = ~np.isnan(theta)
     if np.any(valid_indices):
         theta[valid_indices] = np.unwrap(theta[valid_indices])
-        
+
     omega = np.full(T, np.nan)
     dt = 1.0 / float(fps)
     s, e = max(start_frame, window_radius), min(end_frame, T - 1 - window_radius)
-    
+
     for t in range(s, e + 1):
         vals = [(theta[t + j] - theta[t - j]) / (2.0 * j * dt) for j in range(1, window_radius + 1) if t+j < T and t-j >= 0 and not (np.isnan(theta[t+j]) or np.isnan(theta[t-j]))]
         if vals: omega[t] = np.mean(vals)
-        
+
     return omega, omega * (180.0 / math.pi)
 
 # =================================================================================
@@ -458,14 +458,14 @@ def resample_to_reference_timeline(ref_seq: np.ndarray, test_seq: np.ndarray):
     dtw_dist, path = fastdtw(ref_seq, test_seq, dist=euclidean)
     N, D = ref_seq.shape
     out, cnt = np.zeros((N, D), dtype=np.float32), np.zeros(N, dtype=np.int32)
-    
+
     for i, j in path:
         out[i] += test_seq[j]
         cnt[i] += 1
-        
+
     nz = cnt > 0
     out[nz] /= cnt[nz, None]
-    
+
     for i in range(N):
         if cnt[i] == 0:
             L, R = i - 1, i + 1
@@ -474,7 +474,7 @@ def resample_to_reference_timeline(ref_seq: np.ndarray, test_seq: np.ndarray):
             if L >= 0 and R < N: out[i] = 0.5 * (out[L] + out[R])
             elif L >= 0: out[i] = out[L]
             elif R < N: out[i] = out[R]
-            
+
     per_frame_err = np.linalg.norm(ref_seq - out, axis=1) if len(out) else np.array([])
     return out, dtw_dist, path, per_frame_err
 
@@ -497,10 +497,10 @@ def evaluate_pair_with_dynamic_masks(reference_video: str, test_video: str, used
         ids_masked = masked_used_ids(used_ids, include_wr, include_an)
         seq_ref = extract_and_normalize_landmarks(res_ref['landmarks_list'], ids_masked, res_ref['width'], res_ref['height'])
         seq_tst = extract_and_normalize_landmarks(res_tst['landmarks_list'], ids_masked, res_tst['width'], res_tst['height'])
-        
+
         s_ref, e_ref = start_end_ref
         s_tst, e_tst = start_end_tst
-        
+
         if s_ref is None or e_ref is None or s_tst is None or e_tst is None:
              return float('inf'), 0
 
@@ -508,13 +508,13 @@ def evaluate_pair_with_dynamic_masks(reference_video: str, test_video: str, used
         seg_tst = seq_tst[s_tst:e_tst]
 
         if len(seg_ref) == 0 or len(seg_tst) == 0: return float('inf'), 0
-        
+
         _, dtw_dist, path, _ = resample_to_reference_timeline(seg_ref, seg_tst)
         return float(dtw_dist) / max(1, len(path)), len(path)
 
     phase_scores, phase_costs = [], []
     masks = [(False, False), (False, False), (True, True), (True, True)]
-    
+
     for i, (p_r, p_t) in enumerate(zip(p_ref, p_tst)):
         if p_r[0] is None or p_r[1] is None or p_t[0] is None or p_t[1] is None:
             score, cost = 0.0, float('inf')
@@ -526,7 +526,7 @@ def evaluate_pair_with_dynamic_masks(reference_video: str, test_video: str, used
 
     overall_score = np.mean([s for s in phase_scores if math.isfinite(s)]) if any(math.isfinite(s) for s in phase_scores) else 0.0
     worst_phase_idx = np.argmin(phase_scores) + 1 if phase_scores and np.any(np.isfinite(phase_scores)) else None
-    
+
     return phase_scores, phase_costs, overall_score, worst_phase_idx
 
 # =================================================================================
@@ -603,6 +603,25 @@ def shin_len_px_at(lms, W, H, frame_idx):
 # Video and Image Rendering Functions
 # =================================================================================
 
+def _get_video_writer(save_path: str, fps: int, frame_size: Tuple[int, int]):
+    """
+    Tries to find and return a working cv2.VideoWriter instance.
+    It attempts a list of common FOURCC codecs for MP4 files.
+    """
+    codecs = ['avc1', 'mp4v']  # H.264 is generally preferred and more modern
+    for codec in codecs:
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(save_path, fourcc, fps, frame_size)
+            if writer.isOpened():
+                print(f"VideoWriter opened successfully with codec '{codec}'.")
+                return writer
+        except Exception as e:
+            print(f"Codec '{codec}' failed to initialize: {e}")
+
+    print(f"ERROR: Could not open VideoWriter for path '{save_path}' with any of the attempted codecs: {codecs}.")
+    return None
+
 def draw_bones_diamond_batched(img, segments, color_main, width=12):
     """
     Draws thick, diamond-shaped lines for bones between two points.
@@ -644,8 +663,10 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
         (release, follow, "Phase 4: Follow-through")
     ]
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(save_path, fourcc, fps, (W, H))
+    out = _get_video_writer(save_path, fps, (W, H))
+
+    if out is None:
+        return None
 
     if not out.isOpened():
         print(f"Error: Could not open video writer for path {save_path}")
@@ -702,7 +723,7 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
             cv2.rectangle(frame, (20, 20), (450, 80), (255, 255, 255), -1)
             cv2.putText(frame, current_phase_label, (30, 65),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3, cv2.LINE_AA)
-        
+
         out.write(frame)
 
     out.release()
@@ -716,11 +737,11 @@ def render_release_allinone(result, save_path, shin_length_m=0.45):
     """
     rf = result['release_frame']
     if rf is None: raise RuntimeError("릴리스 프레임을 찾지 못했습니다.")
-    
+
     frame = result['frames'][rf].copy()
     lm = result['landmarks_list'][rf]
     W, H = result['width'], result['height']
-    
+
     if lm is None: raise RuntimeError("릴리스 프레임에서 포즈 랜드마크가 없습니다.")
 
     obstacles = []
@@ -731,7 +752,7 @@ def render_release_allinone(result, save_path, shin_length_m=0.45):
     # --- Calculations ---
     angles = get_joint_angles(lm, W, H)
     height_info = get_hand_height(lm, W, H, shin_length_m)
-    
+
     # --- Drawing ---
     draw_hand_L_path(frame, height_info['ankle'], height_info['wrist'], (0, 0, 255), obstacles)
     draw_angle_lines(frame, angles['shoulder'], angles['elbow'], angles['wrist'], (0, 165, 255), obstacles)
@@ -773,7 +794,7 @@ def render_release_allinone(result, save_path, shin_length_m=0.45):
     cv2.circle(frame, angles['wrist'], 7, (0, 0, 255), -1, cv2.LINE_AA)
 
     cv2.imwrite(save_path, frame)
-    
+
     return {
         "release_frame": rf,
         "right_arm_angle_deg": round(angles['arm_angle'], 1),

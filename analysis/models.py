@@ -2,7 +2,7 @@ import os
 import uuid
 from django.db import models
 from django.utils import timezone
-from django.db.models import JSONField
+from django.db.models import JSONField, CharField
 from django.utils.text import slugify
 
 def player_image_upload_path(instance, filename):
@@ -43,6 +43,8 @@ class Player(models.Model):
     birth_date = models.DateField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
     weight = models.IntegerField(null=True, blank=True)
+    join_year = models.IntegerField(null=True, blank=True)
+    career_stats = CharField(max_length=100, null=True, blank=True)
     throwing_hand = models.CharField(max_length=10, choices=[
         ('R', '우투'),
         ('L', '좌투'),
@@ -79,7 +81,7 @@ class PlayerStats(models.Model):
     holds = models.IntegerField(default=0)
     win_rate = models.DecimalField(max_digits=5, decimal_places=3, null=True, blank=True)
     
-    innings_pitched = models.DecimalField(max_digits=5, decimal_places=1, default=0)
+    innings_pitched = models.CharField(max_length=10, default=0)
     hits_allowed = models.IntegerField(default=0)
     home_runs_allowed = models.IntegerField(default=0)
     walks = models.IntegerField(default=0)
