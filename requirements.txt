@@ -3,19 +3,24 @@ Django>=5.2.0
 
 # Environment variables
 python-decouple>=3.8
+msvc-runtime
 
 # AI/ML Models & Analysis
-ultralytics>=8.0.0
-mediapipe>=0.10.0
-opencv-python>=4.8.0
+ultralytics==8.3.166
+lap>=0.5.12
+mediapipe==0.10.20
+opencv-python==4.11.0.86
 scikit-learn>=1.3.0
-scipy>=1.10.0
-fastdtw>=0.3.4
+scipy==1.13.1
+fastdtw==0.3.4
 
 # Numerics & Imaging
-numpy>=1.24.0
+numpy==1.26.4
 Pillow>=10.0.0
-matplotlib>=3.7.0
+matplotlib==3.8.4
+
+#
+pandas==2.2.2
 
 # Deployment & Packaging
 waitress>=2.1.2
