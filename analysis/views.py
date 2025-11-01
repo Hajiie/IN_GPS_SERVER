@@ -1,14 +1,13 @@
-from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.conf import settings
-from django.db import IntegrityError
-import os
 import json
-import uuid
+import os
 from datetime import datetime
 from decimal import Decimal
+
+from django.conf import settings
 from django.core.files.base import ContentFile
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
 
 from .models import Player, PlayerSeason, PlayerStats, VideoAnalysis
 from .utils import (

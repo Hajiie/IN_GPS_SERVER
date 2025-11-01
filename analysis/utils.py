@@ -6,20 +6,18 @@
 # Commercial use, modification, and distribution of this software are prohibited.
 # You may not use, copy, modify, or distribute this code without permission.
 
+import math
 import os
 import sys
-import math
-import cv2
-import numpy as np
-import mediapipe as mp
-import pandas as pd
-from ultralytics import YOLO
-from fastdtw import fastdtw
-from scipy.spatial.distance import euclidean
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional
 
+import cv2
+import mediapipe as mp
+import numpy as np
 from django.conf import settings
 from django.core.files.base import ContentFile
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
 
 # --- PyInstaller: Force MediaPipe to use bundled models ---
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
