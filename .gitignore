@@ -8,8 +8,8 @@ db.sqlite3
 db.sqlite3-journal
 
 # Django migrations
-# */migrations/*.py
-# !*/migrations/__init__.py
+ */migrations/*.py
+ !*/migrations/__init__.py
 
 # Django static files
 /static/
