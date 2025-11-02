@@ -57,7 +57,7 @@ def upload_video(request):
         video_obj = VideoAnalysis.objects.create(
             player=player,
             video_name=video_name if video_name else os.path.splitext(video_file.name)[0],
-            video_file=video_file
+            video_file=video_file,
         )
     except e:
         return JsonResponse({'result': 'fail', 'reason': str(e)}, status=500)
@@ -140,7 +140,10 @@ def video_detail_api(request, video_id):
                 'frame_list': video_obj.frame_list,
                 'skeleton_video_url': video_obj.skeleton_video.url if video_obj.skeleton_video else None,
                 'release_angle_height': video_obj.release_angle_height,
-                'frame_metrics': video_obj.frame_metrics
+                'frame_metrics': video_obj.frame_metrics,
+                'arm_trajectory': video_obj.arm_trajectory,
+                'arm_swing_speed': video_obj.arm_swing_speed,
+                'shoulder_swing_speed': video_obj.shoulder_swing_speed
             })
         except VideoAnalysis.DoesNotExist:
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
@@ -157,6 +160,23 @@ def frame_metrics_api(request, video_id):
         except VideoAnalysis.DoesNotExist:
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
     return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
+
+@csrf_exempt
+def arm_trajectory_api(request, video_id):
+    if request.method == 'GET':
+        if not video_id:
+            return JsonResponse({'result:': 'fail', 'reason': 'No video_id provided'}, status=400)
+        try:
+            video_obj = get_object_or_404(VideoAnalysis, id=video_id)
+            return JsonResponse({
+                'result': 'success',
+                'arm_trajectory': video_obj.arm_trajectory,
+                'arm_swing_speed': video_obj.arm_swing_speed,
+                'shoulder_swing_speed': video_obj.shoulder_swing_speed})
+        except VideoAnalysis.DoesNotExist:
+            return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
+
 
 @csrf_exempt
 def analyze_video_api(request, video_id):
@@ -190,6 +210,7 @@ def analyze_video_api(request, video_id):
         video_obj.height = height
         video_obj.release_frame_knee = knee_xy
         video_obj.release_frame_ankle = ankle_xy
+
 
         ball_speed_result = None
         if release_frame is not None and knee_xy and ankle_xy:
@@ -245,6 +266,17 @@ def analyze_video_api(request, video_id):
         except Exception as e:
             print(f"Error rendering skeleton video: {e}")
 
+        # Filter out None values from the trajectory list
+        arm_trajectory = [item for item in analysis_result['arm_trajectory'] if item is not None]
+
+        # Convert numpy arrays to lists before saving to JSONField
+        # Filter out nan values and convert to a list of floats
+        wrist_speeds_mps_list = [float(v) for v in analysis_result['wrist_speeds_mps'] if not np.isnan(v)]
+        shoulder_speeds_degps_list = [float(v) for v in analysis_result['shoulder_angular_velocities_degps'] if not np.isnan(v)]
+
+        video_obj.arm_trajectory = arm_trajectory
+        video_obj.arm_swing_speed = wrist_speeds_mps_list
+        video_obj.shoulder_swing_speed = shoulder_speeds_degps_list
         video_obj.save()
 
         return JsonResponse({
@@ -255,7 +287,10 @@ def analyze_video_api(request, video_id):
             'ball_speed': ball_speed_result,
             'release_angle_height': release_angle_height_result,
             'skeleton_video_url': skeleton_video_url,
-            'frame_metrics': frame_metrics
+            'frame_metrics': frame_metrics,
+            'wrist_speeds_mps': wrist_speeds_mps_list,
+            'shoulder_angular_velocities_degps': shoulder_speeds_degps_list,
+            'arm_trajectory': arm_trajectory
         })
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
 
@@ -388,7 +423,8 @@ def player_detail_api(request, player_id):
             'video_count': player.videos.count(),
             'team_name': team_name if team_name else None,
             'join_year': player.join_year,
-            'career_stats': player.career_stats
+            'career_stats': player.career_stats,
+            'optimum_form': player.optimumForm.id if player.optimumForm else ''
         }
         return JsonResponse(player_data)
     return JsonResponse({'result': 'fail', 'reason': 'GET method only'}, status=405)
@@ -571,4 +607,15 @@ def player_season_stats_api(request, player_id):
         except Exception as e:
             return JsonResponse({'result': 'fail', 'reason': str(e)}, status=500)
     
+    return JsonResponse({'result': 'fail', 'reason': 'Method not allowed'}, status=405)
+
+@csrf_exempt
+def register_optimum_api(request, player_id):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        player = get_object_or_404(Player, id=player_id)
+        video = get_object_or_404(VideoAnalysis, id=data.get('video_id'))
+        player.optimumForm = video
+        player.save()
+        return JsonResponse({'result': 'success'})
     return JsonResponse({'result': 'fail', 'reason': 'Method not allowed'}, status=405)

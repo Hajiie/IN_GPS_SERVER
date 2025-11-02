@@ -124,6 +124,23 @@
 }
 ```
 
+### **최적폼 설정**
+`POST /analysis/players/optimum_form/<uuid:player_id>`
+- **설명**: 특정 선수의 최적폼을 설정합니다.
+- **요청 본문 (JSON)**:
+
+```json
+{
+  "video_id": "d1e2f3a4-b5c6-7890-1234-567890abcdef"
+}
+```
+- **응답**: `200 ok`
+```json
+{
+    "result": "success"
+}
+```
+
 ---
 
 ## 3. 선수 시즌 기록 (Player Season)
@@ -384,6 +401,7 @@
   - `GET /analysis/release_angle_height/<uuid:video_id>`
   - `GET /analysis/skeleton_coords/<uuid:video_id>`
   - `GET /analysis/frame_metrics/<uuid:video_id>`
+  - `GET /analysis/arm_trajectory/<uuid:video_id>`
 - **응답**: `200 OK` (각 엔드포인트별 상세 분석 결과)
 ```json
 {
@@ -456,6 +474,15 @@
             "hand_height_m": 1.426872335668805
         },...
     ]
+}
+```
+2구간에서 4구간까지의 팔 스윙 궤적, 팔 스윙 속도, 어깨 회전 속도를 반환
+```json
+{
+  "result": "success",
+  "arm_trajectory": [[913,425],...],
+  "arm_swing_speed": [1.3865232754997097,...],
+  "shoulder_swing_speed": [-310.38960957989036,...]
 }
 ```
 

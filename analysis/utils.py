@@ -16,8 +16,12 @@ import mediapipe as mp
 import numpy as np
 from django.conf import settings
 from django.core.files.base import ContentFile
+
+# Ensure torch and ultralytics are imported as they are used by analyze_video
+import torch
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
+from ultralytics import YOLO
 
 # --- PyInstaller: Force MediaPipe to use bundled models ---
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -42,7 +46,7 @@ CENTER_EDGES = [(11, 12), (23, 24)]
 
 # --- Physics and Analysis ---
 SHIN_LENGTH_M = 0.45
-VIDEO_FPS = 120
+VIDEO_FPS = 120 # Default FPS if not detected from video
 
 # =================================================================================
 # Custom Exception
@@ -86,11 +90,13 @@ def create_thumbnail_from_video(video_file):
 def analyze_video(video_path, yolo_model):
     """
     Analyzes a video to find key pitching frames (start, max knee height, foot plant, release).
-    This is the primary function for video segmentation.
+    This is the primary function for video segmentation and also calculates
+    wrist speed and shoulder angular velocity.
     """
     cap = cv2.VideoCapture(video_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = float(cap.get(cv2.CAP_PROP_FPS)) or VIDEO_FPS # Get actual FPS, fallback to constant
 
     pose = mp.solutions.pose.Pose(static_image_mode=False, model_complexity=2,
                                   smooth_landmarks=True, min_detection_confidence=0.7,
@@ -105,6 +111,7 @@ def analyze_video(video_path, yolo_model):
     while True:
         ret, frame = cap.read()
         if not ret: break
+
         frames.append(frame)
         results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if results.pose_landmarks:
@@ -132,6 +139,7 @@ def analyze_video(video_path, yolo_model):
         x1, y1 = rk.x * width, rk.y * height
         x2, y2 = ra.x * width, ra.y * height
         threshold = math.hypot(x2 - x1, y2 - y1) / SHIN_SCALE_DIVISOR
+
 
     start_frame, fixed_frame, release_frame = None, None, None
 
@@ -172,6 +180,7 @@ def analyze_video(video_path, yolo_model):
         last_hip_y_pix = None
         for n in range(fixed_frame, total_frames):
             frame = frames[n]
+
             lm = landmarks_list[n]
             if not lm: continue
 
@@ -228,13 +237,78 @@ def analyze_video(video_path, yolo_model):
                     release_frame = n; break
                 prev_dist, prev_pos, prev_len = dist, ball_pos, arm_len
 
-    frame_list = [start_frame, max_knee_frame, fixed_frame, release_frame,
-                  (None if release_frame is None else release_frame + 15)]
+    # Define follow_frame based on release_frame, if available
+    follow_frame = (release_frame + 15) if release_frame is not None else None
+
+    frame_list = [start_frame, max_knee_frame, fixed_frame, release_frame, follow_frame]
+
+    # Calculate shin_length_pixels for metric conversion
+    shin_length_pixels = 0
+    if max_knee_frame is not None and landmarks_list[max_knee_frame]:
+        lm = landmarks_list[max_knee_frame]
+        # Use LEFT_KNEE and LEFT_ANKLE for shin length calculation
+        if LEFT_KNEE < len(lm) and LEFT_ANKLE < len(lm):
+            knee_coords = np.array([lm[LEFT_KNEE].x * width, lm[LEFT_KNEE].y * height])
+            ankle_coords = np.array([lm[LEFT_ANKLE].x * width, lm[LEFT_ANKLE].y * height])
+            shin_length_pixels = np.linalg.norm(knee_coords - ankle_coords)
+
+    m_per_px = SHIN_LENGTH_M / shin_length_pixels if shin_length_pixels > 0 else 0.0
+
+    # Compute wrist speed (from fixed_frame to follow_frame)
+    wrist_speeds_mps = np.full(len(landmarks_list), np.nan)
+    if fixed_frame is not None and follow_frame is not None:
+        wrist_speeds_pxps = compute_wrist_speed_series_smoothed(
+            landmarks_list=landmarks_list,
+            width=width,
+            height=height,
+            fps=fps,
+            start_frame=fixed_frame,
+            end_frame=follow_frame,
+            wrist_idx=RIGHT_WRIST
+        )
+        wrist_speeds_mps = wrist_speeds_pxps * m_per_px
+
+
+    # Compute shoulder angular velocity (from fixed_frame to follow_frame)
+    shoulder_angular_velocities_degps = np.full(len(landmarks_list), np.nan)
+    if fixed_frame is not None and follow_frame is not None:
+        _, shoulder_angular_velocities_degps = compute_shoulder_angular_velocity_series(
+            landmarks_list=landmarks_list,
+            width=width,
+            height=height,
+            fps=fps,
+            start_frame=fixed_frame,
+            end_frame=follow_frame,
+            side='right' # Assuming right-handed pitcher
+        )
+
+    # Compute arm trajectory (from fixed_frame to follow_frame)
+    arm_trajectory = []
+    if fixed_frame is not None and follow_frame is not None:
+        arm_trajectory = get_arm_trajectory(
+            landmarks_list,
+            width,
+            height,
+            start_frame=fixed_frame,
+            end_frame=follow_frame,
+            wrist_idx=RIGHT_WRIST
+        )
+
+
     return {
-        'frame_list': frame_list, 'fixed_frame': fixed_frame, 'release_frame': release_frame,
-        'frames': frames, 'landmarks_list': landmarks_list, 'width': width, 'height': height,
-        'max_knee_frame': max_knee_frame
+        'frame_list': frame_list,
+        'fixed_frame': fixed_frame,
+        'release_frame': release_frame,
+        'frames': frames,
+        'landmarks_list': landmarks_list,
+        'width': width,
+        'height': height,
+        'max_knee_frame': max_knee_frame,
+        'wrist_speeds_mps': wrist_speeds_mps, # Added wrist speeds
+        'shoulder_angular_velocities_degps': shoulder_angular_velocities_degps, # Added shoulder angular velocities
+        'arm_trajectory': arm_trajectory # Added arm trajectory
     }
+
 
 # =================================================================================
 # Calculation & Metric Functions
@@ -419,6 +493,33 @@ def compute_shoulder_angular_velocity_series(landmarks_list, width, height, fps,
 
     return omega, omega * (180.0 / math.pi)
 
+def get_arm_trajectory(landmarks_list: List[Optional[List[mp.solutions.pose.PoseLandmark]]], # Changed type hint to List[mp.solutions.pose.PoseLandmark]
+                       width: int, height: int,
+                       start_frame: Optional[int], end_frame: Optional[int],
+                       wrist_idx: int = RIGHT_WRIST,
+                       min_vis: float = 0.5) -> List[Tuple[int, int]]:
+    """
+    Extracts the 2D pixel trajectory of a specified wrist landmark over a given frame range.
+    """
+    trajectory = []
+    if start_frame is None or end_frame is None:
+        return trajectory
+
+    # Ensure frame range is within the bounds of landmarks_list
+    actual_start_frame = max(0, start_frame)
+    actual_end_frame = min(end_frame, len(landmarks_list) - 1)
+
+    for i in range(actual_start_frame, actual_end_frame + 1):
+        if landmarks_list[i] is not None:
+            lm = landmarks_list[i]
+            # Add a check to ensure wrist_idx is a valid index for lm
+            if wrist_idx < len(lm):
+                p = lm[wrist_idx]
+                if getattr(p, "visibility", 1.0) >= min_vis:
+                    trajectory.append((int(p.x * width), int(p.y * height)))
+    return trajectory
+
+
 # =================================================================================
 # DTW and Similarity Functions
 # =================================================================================
@@ -526,6 +627,7 @@ def evaluate_pair_with_dynamic_masks(reference_video: str, test_video: str, used
     worst_phase_idx = np.argmin(phase_scores) + 1 if phase_scores and np.any(np.isfinite(phase_scores)) else None
 
     return phase_scores, phase_costs, overall_score, worst_phase_idx
+
 
 # =================================================================================
 # Utility and Helper Functions

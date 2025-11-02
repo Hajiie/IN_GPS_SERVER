@@ -39,6 +39,7 @@ class Player(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     playerImg = models.ImageField(upload_to=player_image_upload_path, null=True, blank=True)
     playerStandImg = models.ImageField(upload_to=player_standing_image_upload_path, null=True, blank=True)
+    optimumForm = models.ForeignKey('VideoAnalysis', on_delete=models.SET_NULL, null=True, blank=True, related_name='optimum_form')
     name = models.CharField(max_length=100)
     birth_date = models.DateField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
@@ -118,6 +119,10 @@ class VideoAnalysis(models.Model):
     skeleton_coords = JSONField(null=True, blank=True)
     skeleton_video = models.FileField(upload_to=skeleton_video_upload_path, null=True, blank=True)
     frame_metrics = JSONField(null=True, blank=True)
+    arm_trajectory = JSONField(null=True, blank=True)
+    arm_swing_speed = JSONField(null=True, blank=True)
+    shoulder_swing_speed = JSONField(null=True, blank=True)
+
 
     def __str__(self):
         return self.video_name or os.path.basename(self.video_file.name)
