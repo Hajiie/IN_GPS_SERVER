@@ -9,7 +9,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Player, PlayerSeason, PlayerStats, VideoAnalysis
+from .models import Player, PlayerSeason, PlayerStats, VideoAnalysis, DTWAnalysis
 from .utils import (
     create_thumbnail_from_video,
     analyze_video, get_ball_trajectory_and_speed,
@@ -320,6 +320,25 @@ def release_angle_height_api(request, video_id):
 
 @csrf_exempt
 def dtw_similarity_api(request):
+    if request.method == 'GET':
+        if not request.GET.get('reference_id') or not request.GET.get('test_id'):
+            return JsonResponse({'result': 'fail', 'reason': 'reference_id와 test_id는 필수 정보입니다.'}, status=400)
+        try:
+            data = json.loads(request.body)
+            reference_video = data.get('reference_id')
+            test_id = data.get('test_id')
+            dtw_obj = get_object_or_404(DTWAnalysis, reference_video=reference_video, test_video = test_id)
+        except (DTWAnalysis.DoesNotExist, ValueError):
+            # DTW 분석 결과를 찾이 못하였을 때 다시 POST 요청으로 바꿀 수 있게 함.
+            return JsonResponse({'result': 'POST required', 'reason': 'DTW 분석 결과를 찾을 수 없습니다.'}, status=404)
+        return JsonResponse({
+            'result': 'success',
+            'phase_scores': [float(s) for s in dtw_obj.phase_scores],
+            'phase_distances': [float(d) for d in dtw_obj.phase_distances],
+            'overall_score': float(dtw_obj.overall_score),
+            'worst_phase': int(dtw_obj.worst_phase) if dtw_obj.worst_phase is not None else None,
+        })
+
     if request.method == 'POST':
         data = json.loads(request.body)
         reference_id = data.get('reference_id')
@@ -350,6 +369,15 @@ def dtw_similarity_api(request):
                 used_ids=used_ids,
                 yolo_model=yolo_model
             )
+            dtw_obj = DTWAnalysis.objects.create(
+                reference_video=ref_obj.id,
+                test_video=test_obj.id,
+                phase_scores=phase_scores,
+                phase_distances=phase_distances,
+                overall_score=overall_score,
+                worst_phase=worst_idx
+            )
+            dtw_obj.save()
         except PhaseSegmentationError as e:
             return JsonResponse({'result': 'fail', 'reason': f'영상 분할 실패: {e}'}, status=500)
         except Exception as e:
@@ -362,7 +390,7 @@ def dtw_similarity_api(request):
             'overall_score': float(overall_score),
             'worst_phase': int(worst_idx) if worst_idx is not None else None,
         })
-    return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
+    return JsonResponse({'result': 'fail', 'reason': 'GET or POST only'}, status=405)
 
 @csrf_exempt
 def skeleton_coords_api(request, video_id):

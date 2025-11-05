@@ -703,6 +703,56 @@ def shin_len_px_at(lms, W, H, frame_idx):
 # Video and Image Rendering Functions
 # =================================================================================
 
+def build_percentile_range_abs(arr, lo=5, hi=95):
+    v = arr.copy()[~np.isnan(arr)]
+    v = np.abs(v)
+    if v.size == 0: return 0.0, 1.0
+    a, b = np.percentile(v, [lo, hi])
+    if abs(b - a) < 1e-9: a, b = float(v.min()), float(v.max() + 1e-6)
+    return float(a), float(b)
+
+def speed_to_color_bgr(v_mps, v_low, v_high):
+    if v_mps is None or np.isnan(v_mps): return (0, 255, 255)
+    vv = float(max(v_low, min(abs(v_mps), v_high)))
+    t = (vv - v_low) / (v_high - v_low + 1e-9)
+    g, r = int(round(255 * (1.0 - t))), int(round(255 * t))
+    return (0, g, r)
+
+def omega_to_color_bgr(w_degps, w_low, w_high):
+    if w_degps is None or np.isnan(w_degps): return (0, 255, 255)
+    vv = float(max(w_low, min(abs(w_degps), w_high)))
+    t = (vv - w_low) / (w_high - w_low + 1e-9)
+    g, r = int(round(255 * (1.0 - t))), int(round(255 * t))
+    return (0, g, r)
+
+def draw_color_legend(img, lo_val, hi_val, label="Value", pos=(20, 20), size=(220, 20), font_scale=0.6, thick=1):
+    x0, y0 = pos
+    w, h = size
+    for i in range(w):
+        t = i / (w - 1)
+        g, r = int(round(255 * (1.0 - t))), int(round(255 * t))
+        cv2.line(img, (x0 + i, y0), (x0 + i, y0 + h), (0, g, r), 1)
+    cv2.rectangle(img, (x0, y0), (x0 + w, y0 + h), (0, 0, 0), 1)
+    cv2.putText(img, f"{lo_val:.1f}", (x0, y0 + h + 15), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thick, cv2.LINE_AA)
+    cv2.putText(img, f"{hi_val:.1f}", (x0 + w - 36, y0 + h + 15), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thick, cv2.LINE_AA)
+    cv2.putText(img, label, (x0, y0 - 8), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thick, cv2.LINE_AA)
+
+def draw_speed_label_box(img, value, value_color_bgr, label="Speed", unit=" m/s", pad=12, thick=2, font_scale=1.15):
+    H, W = img.shape[:2]
+    disp_v = 0.0 if (value is None or np.isnan(float(value))) else float(value)
+    left_str, mid_str, right_str = f"{label}", f" {disp_v:.2f}", f"{unit}"
+    full_str = left_str + mid_str + right_str
+    (tw_total, th), _ = cv2.getTextSize(full_str, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick)
+    bw, bh = tw_total + 2 * pad, th + 2 * pad
+    x, y = W - bw - 20, 20
+    cv2.rectangle(img, (x, y), (x + bw, y + bh), (255, 255, 255), -1)
+    x0, y0 = x + pad, y + th + pad - 2
+    (tw_left, _), _ = cv2.getTextSize(left_str, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick)
+    (tw_mid, _), _ = cv2.getTextSize(mid_str, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick)
+    cv2.putText(img, left_str, (x0, y0), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thick, cv2.LINE_AA)
+    cv2.putText(img, mid_str, (x0 + tw_left, y0), cv2.FONT_HERSHEY_SIMPLEX, font_scale, value_color_bgr, thick, cv2.LINE_AA)
+    cv2.putText(img, right_str, (x0 + tw_left + tw_mid, y0), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thick, cv2.LINE_AA)
+
 def _get_video_writer(save_path: str, fps: int, frame_size: Tuple[int, int]):
     """
     Tries to find and return a working cv2.VideoWriter instance.
@@ -743,6 +793,33 @@ def draw_bones_diamond_batched(img, segments, color_main, width=12):
                          [x2, y2], [p_bottom[0], p_bottom[1]]], np.int32)
         cv2.fillConvexPoly(img, poly, color_main)
 
+def _draw_skeleton_for_frame(frame, lm, W, H, used_ids, current_phase_idx):
+    if not lm:
+        return
+
+    visible = set(used_ids)
+    if current_phase_idx in (1, 2):
+        visible -= {LEFT_WRIST, RIGHT_WRIST, LEFT_ANKLE, RIGHT_ANKLE}
+
+    for i in visible:
+        if 0 <= i < len(lm):
+            x, y = int(lm[i].x * W), int(lm[i].y * H)
+            cv2.circle(frame, (x, y), 6, (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(frame, (x, y), 2, (0, 0, 0), 2, cv2.LINE_AA)
+
+    def segs(edges):
+        out_segs = []
+        for a, b in edges:
+            if a in visible and b in visible and 0 <= a < len(lm) and 0 <= b < len(lm):
+                ax, ay = int(lm[a].x * W), int(lm[a].y * H)
+                bx, by = int(lm[b].x * W), int(lm[b].y * H)
+                out_segs.append(((ax, ay), (bx, by)))
+        return out_segs
+
+    draw_bones_diamond_batched(frame, segs(LEFT_EDGES), (0, 255, 255), 12)
+    draw_bones_diamond_batched(frame, segs(RIGHT_EDGES), (0, 255, 0), 12)
+    draw_bones_diamond_batched(frame, segs(CENTER_EDGES), (238, 238, 238), 12)
+
 def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[int], fps: int = 30):
     """
     Renders a skeleton overlay video from analysis results and saves it to a file.
@@ -779,10 +856,6 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
         if not (0 <= abs_t < len(frames) and 0 <= abs_t < len(lms_list)):
             continue
 
-        #원본 영상 위에 스켈레톤 입히기
-        #frame = frames[abs_t].copy()
-
-        #검은 배경 위에 스켈레톤 입히기
         frame = np.zeros((H, W, 3), dtype=np.uint8)
         lm = lms_list[abs_t]
 
@@ -794,30 +867,7 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
                 current_phase_idx = i
                 break
 
-        if lm:
-            visible = set(used_ids)
-            if current_phase_idx in (1, 2):
-                visible -= {LEFT_WRIST, RIGHT_WRIST, LEFT_ANKLE, RIGHT_ANKLE}
-
-            for i in visible:
-                if 0 <= i < len(lm):
-                    x = int(lm[i].x * W)
-                    y = int(lm[i].y * H)
-                    cv2.circle(frame, (x, y), 6, (255, 255, 255), -1, cv2.LINE_AA)
-                    cv2.circle(frame, (x, y), 2, (0, 0, 0), 2, cv2.LINE_AA)
-
-            def segs(edges):
-                out_segs = []
-                for a, b in edges:
-                    if a in visible and b in visible and 0 <= a < len(lm) and 0 <= b < len(lm):
-                        ax, ay = int(lm[a].x * W), int(lm[a].y * H)
-                        bx, by = int(lm[b].x * W), int(lm[b].y * H)
-                        out_segs.append(((ax, ay), (bx, by)))
-                return out_segs
-
-            draw_bones_diamond_batched(frame, segs(LEFT_EDGES), (0, 255, 255), 12)
-            draw_bones_diamond_batched(frame, segs(RIGHT_EDGES), (0, 255, 0), 12)
-            draw_bones_diamond_batched(frame, segs(CENTER_EDGES), (238, 238, 238), 12)
+        _draw_skeleton_for_frame(frame, lm, W, H, used_ids, current_phase_idx)
 
         if current_phase_label:
             cv2.rectangle(frame, (20, 20), (450, 80), (255, 255, 255), -1)
@@ -827,7 +877,194 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
         out.write(frame)
 
     out.release()
-    #print(f"Skeleton video saved to {save_path}")
+    return save_path
+
+def render_arm_swing_speed_video(analysis_result: dict, save_path: str, used_ids: List[int], fps: int = 30):
+    """
+    Renders a video visualizing the arm swing speed trajectory with skeleton.
+    """
+    frames = analysis_result['frames']
+    lms_list = analysis_result['landmarks_list']
+    W, H = analysis_result['width'], analysis_result['height']
+    start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
+    v_mps = analysis_result['wrist_speeds_mps']
+
+    if start_f is None or follow_f is None or fixed_f is None:
+        print("Warning: Cannot render arm swing speed video due to incomplete phase segmentation.")
+        return None
+
+    out = _get_video_writer(save_path, fps, (W, H))
+    if not out or not out.isOpened():
+        print(f"Error: Could not open video writer for path {save_path}")
+        return None
+
+    phase_ranges = [
+        (start_f, max_knee_f), (max_knee_f, fixed_f),
+        (fixed_f, release_f), (release_f, follow_f)
+    ]
+
+    w_s = fixed_f
+    w_e = min(follow_f, len(v_mps) - 1)
+    v_low, v_high = build_percentile_range_abs(v_mps[w_s:w_e + 1])
+
+    trail_layer = np.zeros((H, W, 3), dtype=np.uint8)
+    TRAIL_THICKNESS, TRAIL_ALPHA = 16, 0.85
+    prev_wrist_px = None
+
+    for frame_idx in range(start_f, follow_f):
+        frame = np.zeros((H, W, 3), dtype=np.uint8) # Black background
+        lm = lms_list[frame_idx]
+
+        # --- Skeleton Drawing ---
+        if lm:
+            current_phase_idx = 0
+            for i, (ps, pe) in enumerate(phase_ranges, 1):
+                if ps is not None and pe is not None and ps <= frame_idx < pe:
+                    current_phase_idx = i
+                    break
+            _draw_skeleton_for_frame(frame, lm, W, H, used_ids, current_phase_idx)
+
+        # --- Speed-based trail rendering ---
+        if fixed_f <= frame_idx < follow_f:
+            v_curr = v_mps[frame_idx]
+            if not np.isnan(v_curr):
+                col = speed_to_color_bgr(v_curr, v_low, v_high)
+                p_wrist = get_xy_px(lms_list, frame_idx, RIGHT_WRIST, W, H)
+
+                if p_wrist:
+                    wx, wy = int(p_wrist[0]), int(p_wrist[1])
+                    if prev_wrist_px is not None:
+                        cv2.line(trail_layer, prev_wrist_px, (wx, wy), col, TRAIL_THICKNESS, cv2.LINE_AA)
+                    prev_wrist_px = (wx, wy)
+                else:
+                    prev_wrist_px = None
+        
+        final_frame = cv2.addWeighted(frame, 1.0, trail_layer, TRAIL_ALPHA, 0)
+
+        # --- Labels and Legends ---
+        if fixed_f <= frame_idx < follow_f:
+            v_curr = v_mps[frame_idx]
+            if not np.isnan(v_curr):
+                col = speed_to_color_bgr(v_curr, v_low, v_high)
+                draw_speed_label_box(final_frame, v_curr, col, label="Wrist Speed", unit=" m/s")
+
+        draw_color_legend(final_frame, v_low, v_high, label="Wrist v (m/s)", pos=(20, 20))
+
+        out.write(final_frame)
+
+    out.release()
+    return save_path
+
+def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str, used_ids: List[int], fps: int = 30):
+    """
+    Renders a video visualizing the shoulder angular velocity with skeleton.
+    """
+    frames = analysis_result['frames']
+    lms_list = analysis_result['landmarks_list']
+    W, H = analysis_result['width'], analysis_result['height']
+    start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
+    omega_degps = analysis_result['shoulder_angular_velocities_degps']
+
+    if start_f is None or follow_f is None or fixed_f is None:
+        print("Warning: Cannot render shoulder angular velocity video due to incomplete phase segmentation.")
+        return None
+
+    out = _get_video_writer(save_path, fps, (W, H))
+    if not out or not out.isOpened():
+        print(f"Error: Could not open video writer for path {save_path}")
+        return save_path
+
+    phase_ranges = [(start_f, max_knee_f), (max_knee_f, fixed_f), (fixed_f, release_f), (release_f, follow_f)]
+
+    w_s = fixed_f
+    w_e = min(follow_f, len(omega_degps) - 1)
+    w_low, w_high = build_percentile_range_abs(omega_degps[w_s:w_e + 1])
+
+    for frame_idx in range(start_f, follow_f):
+        frame = np.zeros((H, W, 3), dtype=np.uint8) # Black background
+        lm = lms_list[frame_idx]
+
+        # --- Skeleton Drawing (same as before) ---
+        if lm:
+            current_phase_idx = 0
+            for i, (ps, pe) in enumerate(phase_ranges, 1):
+                if ps is not None and pe is not None and ps <= frame_idx < pe:
+                    current_phase_idx = i
+                    break
+            _draw_skeleton_for_frame(frame, lm, W, H, used_ids, current_phase_idx)
+
+        # --- Angular velocity visualization ---
+        if fixed_f <= frame_idx < follow_f:
+            w_curr = omega_degps[frame_idx]
+            if not np.isnan(w_curr):
+                col = omega_to_color_bgr(w_curr, w_low, w_high)
+                p_shoulder = get_xy_px(lms_list, frame_idx, RIGHT_SHOULDER, W, H)
+                p_elbow = get_xy_px(lms_list, frame_idx, RIGHT_ELBOW, W, H)
+
+                if p_shoulder and p_elbow:
+                    sx, sy = int(p_shoulder[0]), int(p_shoulder[1])
+                    ex, ey = int(p_elbow[0]), int(p_elbow[1])
+                    # Draw a thick line for the upper arm
+                    cv2.line(frame, (sx, sy), (ex, ey), col, 14, cv2.LINE_AA)
+
+        # --- Labels and Legends ---
+        if fixed_f <= frame_idx < follow_f:
+            w_curr = omega_degps[frame_idx]
+            if not np.isnan(w_curr):
+                col = omega_to_color_bgr(w_curr, w_low, w_high)
+                draw_speed_label_box(frame, w_curr, col, label="Shoulder ω", unit=" deg/s")
+
+        draw_color_legend(frame, w_low, w_high, label="Shoulder ω (deg/s)", pos=(20, 20))
+
+        out.write(frame)
+
+    out.release()
+    return save_path
+
+def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: str, used_ids: List[int], fps: int = 30):
+    """
+    Renders a video visualizing the ball trajectory after release, with skeleton.
+    """
+    frames = analysis_result['frames']
+    lms_list = analysis_result['landmarks_list']
+    W, H = analysis_result['width'], analysis_result['height']
+    start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
+
+    if release_f is None or follow_f is None:
+        print("Warning: Cannot render ball trajectory video without release frame.")
+        return None
+
+    out = _get_video_writer(save_path, fps, (W, H))
+    if not out or not out.isOpened():
+        print(f"Error: Could not open video writer for path {save_path}")
+        return None
+
+    phase_ranges = [(start_f, max_knee_f), (max_knee_f, fixed_f), (fixed_f, release_f), (release_f, follow_f)]
+    ball_trail = np.zeros((H, W, 3), np.uint8)
+    BALL_TRAIL_ALPHA = 0.9
+
+    for frame_idx in range(release_f, follow_f):
+        frame = frames[frame_idx].copy() # Use original video frame
+        lm = lms_list[frame_idx]
+
+        # --- Skeleton Drawing ---
+        if lm:
+            current_phase_idx = 4 # It's always phase 4 in this loop
+            _draw_skeleton_for_frame(frame, lm, W, H, used_ids, current_phase_idx)
+
+        # --- Ball Detection and Trajectory ---
+        yolo_out = yolo_model.predict(source=frame, conf=0.25, verbose=False, max_det=1)
+        if yolo_out and yolo_out[0].boxes:
+            best = yolo_out[0].boxes[0]
+            x1, y1, x2, y2 = map(int, best.xyxy[0])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 3, cv2.LINE_AA)
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            cv2.circle(ball_trail, (cx, cy), 5, (255, 255, 0), -1, cv2.LINE_AA)
+
+        final_frame = cv2.addWeighted(frame, 1.0, ball_trail, BALL_TRAIL_ALPHA, 0)
+        out.write(final_frame)
+
+    out.release()
     return save_path
 
 def render_release_allinone(result, save_path, shin_length_m=0.45):

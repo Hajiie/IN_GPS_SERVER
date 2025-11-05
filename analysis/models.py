@@ -47,6 +47,12 @@ def release_video_upload_path(instance, filename):
     new_filename = f"{uuid.uuid4()}.{ext}"
     return os.path.join('release_videos', player_id, new_filename)
 
+def shoulder_swing_video_upload_path(instance, filename):
+    player_id = str(instance.player.id) if instance.player else 'unknown_player'
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('shoulder_swing_video', player_id, new_filename)
+
 class Player(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     playerImg = models.ImageField(upload_to=player_image_upload_path, null=True, blank=True)
@@ -131,6 +137,7 @@ class VideoAnalysis(models.Model):
     skeleton_coords = JSONField(null=True, blank=True)
     skeleton_video = models.FileField(upload_to=skeleton_video_upload_path, null=True, blank=True)
     arm_swing_video = models.FileField(upload_to=arm_swing_video_upload_path, null=True, blank=True)
+    shoulder_swing_video = models.FileField(upload_to=shoulder_swing_video_upload_path, null=True, blank=True)
     release_video = models.FileField(upload_to=release_video_upload_path, null=True, blank=True)
     frame_metrics = JSONField(null=True, blank=True)
     arm_trajectory = JSONField(null=True, blank=True)
