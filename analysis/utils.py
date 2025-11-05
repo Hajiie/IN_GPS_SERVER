@@ -912,7 +912,7 @@ def render_arm_swing_speed_video(analysis_result: dict, save_path: str, used_ids
     prev_wrist_px = None
 
     for frame_idx in range(start_f, follow_f):
-        frame = np.zeros((H, W, 3), dtype=np.uint8) # Black background
+        frame = frames[frame_idx].copy() # Original video background
         lm = lms_list[frame_idx]
 
         # --- Skeleton Drawing ---
@@ -980,8 +980,11 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
     w_e = min(follow_f, len(omega_degps) - 1)
     w_low, w_high = build_percentile_range_abs(omega_degps[w_s:w_e + 1])
 
+    trail_layer = np.zeros((H, W, 3), dtype=np.uint8)
+    TRAIL_ALPHA = 0.85
+
     for frame_idx in range(start_f, follow_f):
-        frame = np.zeros((H, W, 3), dtype=np.uint8) # Black background
+        frame = frames[frame_idx].copy() # Original video background
         lm = lms_list[frame_idx]
 
         # --- Skeleton Drawing (same as before) ---
@@ -1004,19 +1007,21 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
                 if p_shoulder and p_elbow:
                     sx, sy = int(p_shoulder[0]), int(p_shoulder[1])
                     ex, ey = int(p_elbow[0]), int(p_elbow[1])
-                    # Draw a thick line for the upper arm
-                    cv2.line(frame, (sx, sy), (ex, ey), col, 14, cv2.LINE_AA)
+                    # Draw trajectory on trail_layer
+                    cv2.line(trail_layer, (sx, sy), (ex, ey), col, 14, cv2.LINE_AA)
 
-        # --- Labels and Legends ---
+        # --- Composition and Labels ---
+        final_frame = cv2.addWeighted(frame, 1.0, trail_layer, TRAIL_ALPHA, 0)
+
         if fixed_f <= frame_idx < follow_f:
             w_curr = omega_degps[frame_idx]
             if not np.isnan(w_curr):
                 col = omega_to_color_bgr(w_curr, w_low, w_high)
-                draw_speed_label_box(frame, w_curr, col, label="Shoulder ω", unit=" deg/s")
+                draw_speed_label_box(final_frame, w_curr, col, label="Shoulder ω", unit=" deg/s")
 
-        draw_color_legend(frame, w_low, w_high, label="Shoulder ω (deg/s)", pos=(20, 20))
+        draw_color_legend(final_frame, w_low, w_high, label="Shoulder ω (deg/s)", pos=(20, 20))
 
-        out.write(frame)
+        out.write(final_frame)
 
     out.release()
     return save_path
@@ -1024,14 +1029,15 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
 def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: str, used_ids: List[int], fps: int = 30):
     """
     Renders a video visualizing the ball trajectory after release, with skeleton.
+    The video covers the full range from start to follow-through.
     """
     frames = analysis_result['frames']
     lms_list = analysis_result['landmarks_list']
     W, H = analysis_result['width'], analysis_result['height']
     start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
 
-    if release_f is None or follow_f is None:
-        print("Warning: Cannot render ball trajectory video without release frame.")
+    if start_f is None or release_f is None or follow_f is None:
+        print("Warning: Cannot render ball trajectory video without full phase segmentation.")
         return None
 
     out = _get_video_writer(save_path, fps, (W, H))
@@ -1043,23 +1049,28 @@ def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: s
     ball_trail = np.zeros((H, W, 3), np.uint8)
     BALL_TRAIL_ALPHA = 0.9
 
-    for frame_idx in range(release_f, follow_f):
+    for frame_idx in range(start_f, follow_f):
         frame = frames[frame_idx].copy() # Use original video frame
         lm = lms_list[frame_idx]
 
         # --- Skeleton Drawing ---
         if lm:
-            current_phase_idx = 4 # It's always phase 4 in this loop
+            current_phase_idx = 0
+            for i, (ps, pe) in enumerate(phase_ranges, 1):
+                if ps is not None and pe is not None and ps <= frame_idx < pe:
+                    current_phase_idx = i
+                    break
             _draw_skeleton_for_frame(frame, lm, W, H, used_ids, current_phase_idx)
 
-        # --- Ball Detection and Trajectory ---
-        yolo_out = yolo_model.predict(source=frame, conf=0.25, verbose=False, max_det=1)
-        if yolo_out and yolo_out[0].boxes:
-            best = yolo_out[0].boxes[0]
-            x1, y1, x2, y2 = map(int, best.xyxy[0])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 3, cv2.LINE_AA)
-            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-            cv2.circle(ball_trail, (cx, cy), 5, (255, 255, 0), -1, cv2.LINE_AA)
+        # --- Ball Detection and Trajectory (only from release frame onwards) ---
+        if frame_idx >= release_f:
+            yolo_out = yolo_model.predict(source=frame, conf=0.25, verbose=False, max_det=1)
+            if yolo_out and yolo_out[0].boxes:
+                best = yolo_out[0].boxes[0]
+                x1, y1, x2, y2 = map(int, best.xyxy[0])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 3, cv2.LINE_AA)
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                cv2.circle(ball_trail, (cx, cy), 5, (255, 255, 0), -1, cv2.LINE_AA)
 
         final_frame = cv2.addWeighted(frame, 1.0, ball_trail, BALL_TRAIL_ALPHA, 0)
         out.write(final_frame)
