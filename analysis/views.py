@@ -15,7 +15,8 @@ from .utils import (
     analyze_video, get_ball_trajectory_and_speed,
     get_joint_angles, get_hand_height,
     evaluate_pair_with_dynamic_masks, PhaseSegmentationError,
-    render_skeleton_video, calculate_frame_by_frame_metrics
+    render_skeleton_video, calculate_frame_by_frame_metrics, render_arm_swing_speed_video,
+    render_shoulder_angular_velocity_video, render_ball_trajectory_video
 )
 
 # YOLO 모델 전역 로드 (최초 1회)
@@ -243,25 +244,66 @@ def analyze_video_api(request, video_id):
         video_obj.frame_metrics = frame_metrics
 
         skeleton_video_url = None
+        arm_video_url = None
+        shoulder_video_url = None
+        release_video_url = None
         try:
             # Create a temporary path for the rendered video
             temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp')
             os.makedirs(temp_dir, exist_ok=True)
-            temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_skeleton.mp4")
 
             used_ids = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
-            
-            rendered_path = render_skeleton_video(analysis_result, temp_save_path, used_ids)
-            
-            if rendered_path:
+
+            temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_skeleton.mp4")
+            skeleton_rendered_path = render_skeleton_video(analysis_result, temp_save_path, used_ids)
+            temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_arm.mp4")
+            arm_rendered_path = render_arm_swing_speed_video(analysis_result, temp_save_path, used_ids)
+            temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_shoulder.mp4")
+            shoulder_rendered_path = render_shoulder_angular_velocity_video(analysis_result, temp_save_path, used_ids)
+            temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_release.mp4")
+            release_rendered_path = render_ball_trajectory_video(analysis_result, yolo_model,temp_save_path, used_ids)
+
+            if skeleton_rendered_path:
                 if video_obj.skeleton_video:
                     video_obj.skeleton_video.delete(save=False) # Delete old file from storage
 
-                with open(rendered_path, 'rb') as f:
-                    video_obj.skeleton_video.save(os.path.basename(rendered_path), ContentFile(f.read()), save=False)
+                with open(skeleton_rendered_path, 'rb') as f:
+                    video_obj.skeleton_video.save(os.path.basename(skeleton_rendered_path), ContentFile(f.read()), save=False)
                 
-                os.remove(rendered_path) # Clean up temp file
+                os.remove(skeleton_rendered_path) # Clean up temp file
                 skeleton_video_url = video_obj.skeleton_video.url
+
+            if arm_rendered_path:
+                if video_obj.arm_swing_video:
+                    video_obj.arm_swing_video.delete(save=False) # Delete old file from storage
+
+                with open(arm_rendered_path, 'rb') as f:
+                    video_obj.arm_swing_video.save(os.path.basename(arm_rendered_path), ContentFile(f.read()), save=False)
+
+                os.remove(arm_rendered_path) # Clean up temp file
+                arm_video_url = video_obj.arm_swing_video.url
+
+            if shoulder_rendered_path:
+                if video_obj.shoulder_swing_video:
+                    video_obj.shoulder_swing_video.delete(save=False)
+
+                with open(shoulder_rendered_path, 'rb') as f:
+                    video_obj.shoulder_swing_video.save(os.path.basename(shoulder_rendered_path), ContentFile(f.read()), save=False)
+
+                os.remove(shoulder_rendered_path)
+                shoulder_video_url = video_obj.shoulder_swing_video.url
+
+            if release_rendered_path:
+                if video_obj.release_video:
+                    video_obj.release_video.delete(save=False)
+
+                with open(release_rendered_path, 'rb') as f:
+                    video_obj.release_video.save(os.path.basename(release_rendered_path), ContentFile(f.read()), save=False)
+
+                os.remove(release_rendered_path)
+                release_video_url = video_obj.release_video.url
+
+
 
         except Exception as e:
             print(f"Error rendering skeleton video: {e}")
@@ -287,6 +329,9 @@ def analyze_video_api(request, video_id):
             'ball_speed': ball_speed_result,
             'release_angle_height': release_angle_height_result,
             'skeleton_video_url': skeleton_video_url,
+            'arm_swing_video_url': arm_video_url,
+            'shoulder_swing_video_url': shoulder_video_url,
+            'release_video_url': release_video_url,
             'frame_metrics': frame_metrics,
             'wrist_speeds_mps': wrist_speeds_mps_list,
             'shoulder_angular_velocities_degps': shoulder_speeds_degps_list,
@@ -321,13 +366,13 @@ def release_angle_height_api(request, video_id):
 @csrf_exempt
 def dtw_similarity_api(request):
     if request.method == 'GET':
-        if not request.GET.get('reference_id') or not request.GET.get('test_id'):
-            return JsonResponse({'result': 'fail', 'reason': 'reference_id와 test_id는 필수 정보입니다.'}, status=400)
         try:
             data = json.loads(request.body)
+            if not data.get('reference_id') or not data.get('test_id'):
+                return JsonResponse({'result': 'fail', 'reason': 'reference_id와 test_id는 필수 정보입니다.'}, status=400)
             reference_video = data.get('reference_id')
             test_id = data.get('test_id')
-            dtw_obj = get_object_or_404(DTWAnalysis, reference_video=reference_video, test_video = test_id)
+            dtw_obj = get_object_or_404(DTWAnalysis, reference_video = reference_video, test_video = test_id)
         except (DTWAnalysis.DoesNotExist, ValueError):
             # DTW 분석 결과를 찾이 못하였을 때 다시 POST 요청으로 바꿀 수 있게 함.
             return JsonResponse({'result': 'POST required', 'reason': 'DTW 분석 결과를 찾을 수 없습니다.'}, status=404)
