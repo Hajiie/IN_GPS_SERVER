@@ -35,6 +35,18 @@ def skeleton_video_upload_path(instance, filename):
     new_filename = f"{uuid.uuid4()}.{ext}"
     return os.path.join('skeleton_videos', player_id, new_filename)
 
+def arm_swing_video_upload_path(instance, filename):
+    player_id = str(instance.player.id) if instance.player else 'unknown_player'
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('arm_swing_videos', player_id, new_filename)
+
+def release_video_upload_path(instance, filename):
+    player_id = str(instance.player.id) if instance.player else 'unknown_player'
+    ext = filename.split('.')[-1]
+    new_filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('release_videos', player_id, new_filename)
+
 class Player(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     playerImg = models.ImageField(upload_to=player_image_upload_path, null=True, blank=True)
@@ -118,6 +130,8 @@ class VideoAnalysis(models.Model):
     release_angle_height = JSONField(null=True, blank=True)
     skeleton_coords = JSONField(null=True, blank=True)
     skeleton_video = models.FileField(upload_to=skeleton_video_upload_path, null=True, blank=True)
+    arm_swing_video = models.FileField(upload_to=arm_swing_video_upload_path, null=True, blank=True)
+    release_video = models.FileField(upload_to=release_video_upload_path, null=True, blank=True)
     frame_metrics = JSONField(null=True, blank=True)
     arm_trajectory = JSONField(null=True, blank=True)
     arm_swing_speed = JSONField(null=True, blank=True)
@@ -134,3 +148,13 @@ class VideoAnalysis(models.Model):
         if self.skeleton_video:
             self.skeleton_video.delete(save=False)
         super().delete(*args, **kwargs)
+
+class DTWAnalysis(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reference_video = models.UUIDField(default=uuid.uuid4, editable=False)
+    test_video = models.UUIDField(default=uuid.uuid4, editable=False)
+    phase_scores = JSONField(null=True, blank=True)
+    phase_distances = JSONField(null=True, blank=True)
+    overall_score = models.FloatField(null=True, blank=True)
+    worst_phase = models.IntegerField(null=True, blank=True)
+
