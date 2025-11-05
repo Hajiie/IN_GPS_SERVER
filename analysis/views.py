@@ -255,7 +255,7 @@ def analyze_video_api(request, video_id):
             temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp')
             os.makedirs(temp_dir, exist_ok=True)
 
-            used_ids = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+            used_ids = [11, 12, 14, 16, 23, 24, 25, 26, 27, 28]
 
             temp_save_path = os.path.join(temp_dir, f"{video_obj.id}_skeleton.mp4")
             skeleton_rendered_path = render_skeleton_video(analysis_result, temp_save_path, used_ids)
