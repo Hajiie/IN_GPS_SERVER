@@ -136,6 +136,7 @@ def analyze_video(video_path, yolo_model):
     total_frames = len(frames)
     valid_knees = [(i, y) for i, y in enumerate(knee_y_list) if y is not None]
     max_knee_frame = min(valid_knees, key=lambda x: x[1])[0] if valid_knees else None
+    print(total_frames)
 
     threshold = None
     if max_knee_frame is not None and landmarks_list[max_knee_frame] is not None:
@@ -904,12 +905,9 @@ def render_skeleton_video(analysis_result: dict, save_path: str, used_ids: List[
     if not out.isOpened():
         print(f"Error: Could not open video writer for path {save_path}")
         return None
-    
-    # 원본 영상 전체 길이를 사용하도록 시작/끝 프레임을 0과 전체 프레임 수로 설정
-    render_start_frame = 0
-    render_end_frame = len(frames)
 
-    for abs_t in range(render_start_frame, render_end_frame):
+
+    for abs_t in range(start, follow):
         current_phase_label = ""
         current_phase_idx = 0
         for i, (ps, pe, label) in enumerate(phase_ranges, 1):
@@ -941,10 +939,10 @@ def render_arm_swing_speed_video(analysis_result: dict, save_path: str, used_ids
     frames = analysis_result['frames']
     lms_list = analysis_result['landmarks_list']
     W, H = analysis_result['width'], analysis_result['height']
-    start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
+    start, max_knee, fixed, release, follow = analysis_result['frame_list']
     v_mps = analysis_result['wrist_speeds_mps']
 
-    if start_f is None or follow_f is None or fixed_f is None:
+    if start is None or follow is None or fixed is None:
         print("Warning: Cannot render arm swing speed video due to incomplete phase segmentation.")
         return None
 
@@ -954,28 +952,25 @@ def render_arm_swing_speed_video(analysis_result: dict, save_path: str, used_ids
         return None
 
     phase_ranges = [
-        (start_f, max_knee_f), (max_knee_f, fixed_f),
-        (fixed_f, release_f), (release_f, follow_f)
+        (start, max_knee), (max_knee, fixed),
+        (fixed, release), (release, follow)
     ]
 
-    w_s = fixed_f
-    w_e = min(follow_f, len(v_mps) - 1)
+    w_s = fixed
+    w_e = min(follow, len(v_mps) - 1)
     v_low, v_high = build_percentile_range_abs(v_mps[w_s:w_e + 1])
 
     trail_layer = np.zeros((H, W, 3), dtype=np.uint8)
     TRAIL_THICKNESS, TRAIL_ALPHA = 16, 0.85
     prev_wrist_px = None
 
-    # 원본 영상 전체 길이를 사용하도록 시작/끝 프레임을 0과 전체 프레임 수로 설정
-    render_start_frame = 0
-    render_end_frame = len(frames)
 
-    for frame_idx in range(render_start_frame, render_end_frame):
+    for frame_idx in range(start, follow):
         frame = frames[frame_idx].copy()  # Original video background
         lm = lms_list[frame_idx]
 
         # --- Speed-based trail rendering ---
-        if fixed_f <= frame_idx < follow_f:
+        if fixed <= frame_idx < follow:
             v_curr = v_mps[frame_idx]
             if not np.isnan(v_curr):
                 col = speed_to_color_bgr(v_curr, v_low, v_high)
@@ -1002,7 +997,7 @@ def render_arm_swing_speed_video(analysis_result: dict, save_path: str, used_ids
         final_frame = cv2.addWeighted(frame, 1.0, trail_layer, TRAIL_ALPHA, 0)
 
         # --- Labels and Legends ---
-        if fixed_f <= frame_idx < follow_f:
+        if fixed <= frame_idx < follow:
             v_curr = v_mps[frame_idx]
             if not np.isnan(v_curr):
                 col = speed_to_color_bgr(v_curr, v_low, v_high)
@@ -1023,10 +1018,10 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
     frames = analysis_result['frames']
     lms_list = analysis_result['landmarks_list']
     W, H = analysis_result['width'], analysis_result['height']
-    start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
+    start, max_knee, fixed, release, follow = analysis_result['frame_list']
     omega_degps = analysis_result['shoulder_angular_velocities_degps']
 
-    if start_f is None or follow_f is None or fixed_f is None:
+    if start is None or follow is None or fixed is None:
         print("Warning: Cannot render shoulder angular velocity video due to incomplete phase segmentation.")
         return None
 
@@ -1035,25 +1030,22 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
         print(f"Error: Could not open video writer for path {save_path}")
         return save_path
 
-    phase_ranges = [(start_f, max_knee_f), (max_knee_f, fixed_f), (fixed_f, release_f), (release_f, follow_f)]
+    phase_ranges = [(start, max_knee), (max_knee, fixed), (fixed, release), (release, follow)]
 
-    w_s = fixed_f
-    w_e = min(follow_f, len(omega_degps) - 1)
+    w_s = fixed
+    w_e = min(follow, len(omega_degps) - 1)
     w_low, w_high = build_percentile_range_abs(omega_degps[w_s:w_e + 1])
 
     trail_layer = np.zeros((H, W, 3), dtype=np.uint8)
     TRAIL_ALPHA = 0.85
 
-    # 원본 영상 전체 길이를 사용하도록 시작/끝 프레임을 0과 전체 프레임 수로 설정
-    render_start_frame = 0
-    render_end_frame = len(frames)
 
-    for frame_idx in range(render_start_frame, render_end_frame):
+    for frame_idx in range(start, follow):
         frame = frames[frame_idx].copy()  # Original video background
         lm = lms_list[frame_idx]
 
         # --- Angular velocity visualization ---
-        if fixed_f <= frame_idx < follow_f:
+        if fixed <= frame_idx < follow:
             w_curr = omega_degps[frame_idx]
             if not np.isnan(w_curr):
                 col = omega_to_color_bgr(w_curr, w_low, w_high)
@@ -1079,7 +1071,7 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
         # --- Composition and Labels ---
         final_frame = cv2.addWeighted(frame, 1.0, trail_layer, TRAIL_ALPHA, 0)
 
-        if fixed_f <= frame_idx < follow_f:
+        if fixed <= frame_idx < follow:
             w_curr = omega_degps[frame_idx]
             if not np.isnan(w_curr):
                 col = omega_to_color_bgr(w_curr, w_low, w_high)
@@ -1101,9 +1093,9 @@ def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: s
     frames = analysis_result['frames']
     lms_list = analysis_result['landmarks_list']
     W, H = analysis_result['width'], analysis_result['height']
-    start_f, max_knee_f, fixed_f, release_f, follow_f = analysis_result['frame_list']
+    start, max_knee, fixed, release, follow = analysis_result['frame_list']
 
-    if start_f is None or release_f is None or follow_f is None:
+    if start is None or release is None or follow is None:
         print("Warning: Cannot render ball trajectory video without full phase segmentation.")
         return None
 
@@ -1112,20 +1104,16 @@ def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: s
         print(f"Error: Could not open video writer for path {save_path}")
         return None
 
-    phase_ranges = [(start_f, max_knee_f), (max_knee_f, fixed_f), (fixed_f, release_f), (release_f, follow_f)]
+    phase_ranges = [(start, max_knee), (max_knee, fixed), (fixed, release), (release, follow)]
     ball_trail = np.zeros((H, W, 3), np.uint8)
     BALL_TRAIL_ALPHA = 0.9
 
-    # 원본 영상 전체 길이를 사용하도록 시작/끝 프레임을 0과 전체 프레임 수로 설정
-    render_start_frame = 0
-    render_end_frame = len(frames)
-
-    for frame_idx in range(render_start_frame, render_end_frame):
+    for frame_idx in range(start, follow):
         frame = frames[frame_idx].copy()  # Use original video frame
         lm = lms_list[frame_idx]
 
         # --- 릴리스 프레임에 분석 정보 오버레이 ---
-        if frame_idx == release_f and lm is not None:
+        if frame_idx == release and lm is not None:
             # print(f"릴리스 프레임({frame_idx})에 분석 정보를 덧씌웁니다.")
             obstacles = []
             placed_rects = []
@@ -1165,7 +1153,7 @@ def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: s
                     side=side_wrist, tcolor=(0, 0, 255), placed_rects=placed_rects, avoid_rects=obstacles)
 
         # --- Ball Detection and Trajectory (only from release frame onwards) ---
-        if frame_idx >= release_f:
+        if frame_idx >= release:
             yolo_out = yolo_model.predict(source=frame, conf=0.25, verbose=False, max_det=1)
             if yolo_out and yolo_out[0].boxes:
                 best = yolo_out[0].boxes[0]
