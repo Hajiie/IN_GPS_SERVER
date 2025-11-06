@@ -315,7 +315,8 @@ def analyze_video(video_path, yolo_model):
         'max_knee_frame': max_knee_frame,
         'wrist_speeds_mps': wrist_speeds_mps,  # Added wrist speeds
         'shoulder_angular_velocities_degps': shoulder_angular_velocities_degps,  # Added shoulder angular velocities
-        'arm_trajectory': arm_trajectory  # Added arm trajectory
+        'arm_trajectory': arm_trajectory,  # Added arm trajectory
+        'fps': fps
     }
 
 
@@ -1125,7 +1126,7 @@ def render_ball_trajectory_video(analysis_result: dict, yolo_model, save_path: s
 
         # --- 릴리스 프레임에 분석 정보 오버레이 ---
         if frame_idx == release_f and lm is not None:
-            print(f"릴리스 프레임({frame_idx})에 분석 정보를 덧씌웁니다.")
+            # print(f"릴리스 프레임({frame_idx})에 분석 정보를 덧씌웁니다.")
             obstacles = []
             placed_rects = []
 

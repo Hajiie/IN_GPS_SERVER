@@ -105,10 +105,10 @@ def videos_list_api(request):
 def delete_video_api(request, video_id):
     if request.method != 'DELETE':
         return JsonResponse({'result': 'fail', 'reason': 'DELETE method only'}, status=405)
-    
+
     try:
         video_obj = get_object_or_404(VideoAnalysis, id=video_id)
-        video_name = video_obj.video_name or os.path.basename(video_obj.video_file.name)
+        video_name = video_obj.video_file or os.path.basename(video_obj.video_file.name)
         video_obj.delete()
         return JsonResponse({'result': 'success', 'message': f'Video "{video_name}" deleted successfully.'})
     except VideoAnalysis.DoesNotExist:
@@ -147,7 +147,8 @@ def video_detail_api(request, video_id):
                 'frame_metrics': video_obj.frame_metrics,
                 'arm_trajectory': video_obj.arm_trajectory,
                 'arm_swing_speed': video_obj.arm_swing_speed,
-                'shoulder_swing_speed': video_obj.shoulder_swing_speed
+                'shoulder_swing_speed': video_obj.shoulder_swing_speed,
+                'fps': video_obj.fps
             })
         except VideoAnalysis.DoesNotExist:
             return JsonResponse({'result': 'fail', 'reason': 'Video not found'}, status=404)
@@ -187,7 +188,7 @@ def analyze_video_api(request, video_id):
     if request.method == 'POST':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
-        
+
         try:
             video_obj = get_object_or_404(VideoAnalysis, id=video_id)
             video_path = video_obj.video_file.path
@@ -214,6 +215,8 @@ def analyze_video_api(request, video_id):
         video_obj.height = height
         video_obj.release_frame_knee = knee_xy
         video_obj.release_frame_ankle = ankle_xy
+        video_obj.fps = analysis_result['fps']
+        #print(analysis_result['fps'])
 
 
         ball_speed_result = None
@@ -272,7 +275,7 @@ def analyze_video_api(request, video_id):
 
                 with open(skeleton_rendered_path, 'rb') as f:
                     video_obj.skeleton_video.save(os.path.basename(skeleton_rendered_path), ContentFile(f.read()), save=False)
-                
+
                 os.remove(skeleton_rendered_path) # Clean up temp file
                 skeleton_video_url = video_obj.skeleton_video.url
 
@@ -338,7 +341,8 @@ def analyze_video_api(request, video_id):
             'frame_metrics': frame_metrics,
             'wrist_speeds_mps': wrist_speeds_mps_list,
             'shoulder_angular_velocities_degps': shoulder_speeds_degps_list,
-            'arm_trajectory': arm_trajectory
+            'arm_trajectory': arm_trajectory,
+            'fps': analysis_result['fps']
         })
     return JsonResponse({'result': 'fail', 'reason': 'POST only'}, status=405)
 
@@ -368,25 +372,6 @@ def release_angle_height_api(request, video_id):
 
 @csrf_exempt
 def dtw_similarity_api(request):
-    if request.method == 'GET':
-        try:
-            data = json.loads(request.body)
-            if not data.get('reference_id') or not data.get('test_id'):
-                return JsonResponse({'result': 'fail', 'reason': 'reference_id와 test_id는 필수 정보입니다.'}, status=400)
-            reference_video = data.get('reference_id')
-            test_id = data.get('test_id')
-            dtw_obj = get_object_or_404(DTWAnalysis, reference_video = reference_video, test_video = test_id)
-        except (DTWAnalysis.DoesNotExist, ValueError):
-            # DTW 분석 결과를 찾이 못하였을 때 다시 POST 요청으로 바꿀 수 있게 함.
-            return JsonResponse({'result': 'POST required', 'reason': 'DTW 분석 결과를 찾을 수 없습니다.'}, status=404)
-        return JsonResponse({
-            'result': 'success',
-            'phase_scores': [float(s) for s in dtw_obj.phase_scores],
-            'phase_distances': [float(d) for d in dtw_obj.phase_distances],
-            'overall_score': float(dtw_obj.overall_score),
-            'worst_phase': int(dtw_obj.worst_phase) if dtw_obj.worst_phase is not None else None,
-        })
-
     if request.method == 'POST':
         data = json.loads(request.body)
         reference_id = data.get('reference_id')
@@ -395,7 +380,19 @@ def dtw_similarity_api(request):
 
         if not (reference_id and test_id):
             return JsonResponse({'result': 'fail', 'reason': 'reference_id와 test_id는 필수 정보입니다.'}, status=400)
-        
+
+        try:
+            dtw_obj = DTWAnalysis.objects.filter(reference_video=reference_id, test_video=test_id).latest('id')
+            return JsonResponse({
+                'result': 'success',
+                'phase_scores': [float(s) for s in dtw_obj.phase_scores],
+                'phase_distances': [float(d) for d in dtw_obj.phase_distances],
+                'overall_score': float(dtw_obj.overall_score),
+                'worst_phase': int(dtw_obj.worst_phase) if dtw_obj.worst_phase is not None else None,
+            })
+        except DTWAnalysis.DoesNotExist:
+            pass
+
         try:
             ref_obj = get_object_or_404(VideoAnalysis, id=reference_id)
             test_obj = get_object_or_404(VideoAnalysis, id=test_id)
@@ -417,7 +414,7 @@ def dtw_similarity_api(request):
                 used_ids=used_ids,
                 yolo_model=yolo_model
             )
-            dtw_obj = DTWAnalysis.objects.create(
+            dtw_obj_new = DTWAnalysis.objects.create(
                 reference_video=ref_obj.id,
                 test_video=test_obj.id,
                 phase_scores=phase_scores,
@@ -425,7 +422,6 @@ def dtw_similarity_api(request):
                 overall_score=overall_score,
                 worst_phase=worst_idx
             )
-            dtw_obj.save()
         except PhaseSegmentationError as e:
             return JsonResponse({'result': 'fail', 'reason': f'영상 분할 실패: {e}'}, status=500)
         except Exception as e:

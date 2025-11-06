@@ -143,6 +143,7 @@ class VideoAnalysis(models.Model):
     arm_trajectory = JSONField(null=True, blank=True)
     arm_swing_speed = JSONField(null=True, blank=True)
     shoulder_swing_speed = JSONField(null=True, blank=True)
+    fps = models.FloatField(null=True, blank=True)
 
 
     def __str__(self):
