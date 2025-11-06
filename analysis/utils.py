@@ -136,7 +136,6 @@ def analyze_video(video_path, yolo_model):
     total_frames = len(frames)
     valid_knees = [(i, y) for i, y in enumerate(knee_y_list) if y is not None]
     max_knee_frame = min(valid_knees, key=lambda x: x[1])[0] if valid_knees else None
-    print(total_frames)
 
     threshold = None
     if max_knee_frame is not None and landmarks_list[max_knee_frame] is not None:
