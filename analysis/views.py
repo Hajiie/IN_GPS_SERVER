@@ -95,6 +95,8 @@ def videos_list_api(request):
                 'upload_time': v.upload_time.isoformat(),
                 'player_id': str(v.player.id) if v.player else None,
                 'player_name': v.player.name if v.player else None,
+                # video 에서 분석이 완료됨을 표시하기 위하여 값 하나를 임의로 가져와 비교 후 true false 반환
+                'isAnalysis': True if v.ball_speed else False
             }
             for v in videos
         ]
