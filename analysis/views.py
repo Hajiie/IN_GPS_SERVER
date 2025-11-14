@@ -1,11 +1,12 @@
 import json
 import os
-from datetime import datetime
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.http import JsonResponse
+from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 
@@ -45,7 +46,7 @@ def upload_video(request):
         return JsonResponse({'result': 'fail', 'reason': '선수 이름과 생년월일을 모두 입력해주세요'}, status=400)
 
     try:
-        birth_date_obj = datetime.strptime(birth_date, '%Y-%m-%d').date()
+        birth_date_obj = timezone.datetime.strptime(birth_date, '%Y-%m-%d').date()
         player, _ = Player.objects.get_or_create(
             name=player_name,
             birth_date=birth_date_obj,
@@ -376,6 +377,7 @@ def release_angle_height_api(request, video_id):
 def dtw_similarity_api(request):
     if request.method == 'POST':
         data = json.loads(request.body)
+        player_id = data.get('player_id')
         reference_id = data.get('reference_id')
         test_id = data.get('test_id')
         used_ids = data.get('used_ids', [11, 12, 14, 16, 23, 24, 25, 27])
@@ -394,6 +396,11 @@ def dtw_similarity_api(request):
             })
         except DTWAnalysis.DoesNotExist:
             pass
+
+        try:
+            player = get_object_or_404(Player, pk=player_id)
+        except (Player.DoesNotExist, ValueError):
+            return JsonResponse({'result': 'fail', 'reason': 'Player not found'}, status=404)
 
         try:
             ref_obj = get_object_or_404(VideoAnalysis, id=reference_id)
@@ -417,6 +424,7 @@ def dtw_similarity_api(request):
                 yolo_model=yolo_model
             )
             dtw_obj_new = DTWAnalysis.objects.create(
+                player_id=player,
                 reference_video=ref_obj.id,
                 test_video=test_obj.id,
                 phase_scores=phase_scores,
@@ -437,6 +445,57 @@ def dtw_similarity_api(request):
             'worst_phase': int(worst_idx) if worst_idx is not None else None,
         })
     return JsonResponse({'result': 'fail', 'reason': 'GET or POST only'}, status=405)
+
+@csrf_exempt
+def dtw_similarity_score_api(request, player_id):
+    if request.method == 'GET':
+        try:
+            # 요청이 들어온 일자로부터 31일 간의 기록만 반환
+            dtw_obj = DTWAnalysis.objects.filter(player_id=player_id).filter(upload_time__gte=timezone.now() - timedelta(days=31)).order_by('-upload_time')
+            if dtw_obj is None:
+                return JsonResponse({'result': 'fail', 'reason': 'No videos found'}, status=404)
+
+            # 같은 날의 기록들은 점수를 합산한 후 평균으로 재반환
+            result = []
+            cnt = 0
+            score = 0
+            date = None
+            ref_id = None
+            isChanged = False
+            for dtw in dtw_obj:
+                # 같은 날의 기록들은 점수를 합산한 후 평균으로 재반환
+                # 같은 날 내에 ref_id 가 변경된 경우 체크
+                if date == dtw.upload_time.date() or date is None:
+                    score += dtw.overall_score
+                    cnt += 1
+                    if ref_id != dtw.reference_video and ref_id is not None:
+                        isChanged = True
+                else:
+                    result.append({
+                        'upload_time': date,
+                        'overall_score': score / cnt,
+                        'isChanged': isChanged
+                    })
+                    score = dtw.overall_score
+                    cnt = 1
+                    isChanged = False
+                date = dtw.upload_time.date()
+                ref_id = dtw.reference_video
+            result.append({
+                'upload_time': date,
+                'overall_score': score / cnt,
+                'isChanged': isChanged
+            })
+
+            return JsonResponse({
+                'result': 'success',
+                'dtw_similarity_scores': result
+            })
+
+        except Exception as e:
+            return JsonResponse({'result': 'fail', 'reason': str(e)}, status=500)
+    return JsonResponse({'result': 'fail', 'reason': 'GET only'}, status=405)
+
 
 @csrf_exempt
 def skeleton_coords_api(request, video_id):
@@ -460,7 +519,7 @@ def skeleton_coords_api(request, video_id):
 def players_list_api(request):
     if request.method == 'GET':
         players = Player.objects.all().order_by('name')
-        team_name = PlayerSeason.objects.filter(year=datetime.now().year).values_list('team','player_id')
+        team_name = PlayerSeason.objects.filter(year=timezone.now().year).values_list('team','player_id')
 
         players_data = [
             {
@@ -484,7 +543,7 @@ def players_list_api(request):
 def player_detail_api(request, player_id):
     if request.method == 'GET':
         player = get_object_or_404(Player, id=player_id)
-        team_name = PlayerSeason.objects.filter(player_id=player_id, year=datetime.now().year).values_list('team', flat=True).first()
+        team_name = PlayerSeason.objects.filter(player_id=player_id, year=timezone.now().year).values_list('team', flat=True).first()
         player_data = {
             'id': str(player.id),
             'name': player.name,
@@ -517,7 +576,7 @@ def player_create_api(request):
         birth_date = None
         if birth_date_str:
             try:
-                birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                birth_date = timezone.datetime.strptime(birth_date_str, '%Y-%m-%d').date()
             except ValueError:
                 return JsonResponse({'result': 'fail', 'reason': '생년월일 형식이 올바르지 않습니다.'}, status=400)
         
@@ -559,7 +618,7 @@ def player_update_api(request, player_id):
             birth_date_str = data.get('birth_date')
             if birth_date_str:
                 try:
-                    player.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                    player.birth_date = timezone.datetime.strptime(birth_date_str, '%Y-%m-%d').date()
                 except ValueError:
                     return JsonResponse({'result': 'fail', 'reason': '생년월일 형식이 올바르지 않습니다.'}, status=400)
             else:

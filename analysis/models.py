@@ -159,6 +159,8 @@ class VideoAnalysis(models.Model):
 
 class DTWAnalysis(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    player_id = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='dtw_analyses', null=True, blank=True)
+    upload_time = models.DateTimeField(default=timezone.now)
     reference_video = models.UUIDField(default=uuid.uuid4, editable=False)
     test_video = models.UUIDField(default=uuid.uuid4, editable=False)
     phase_scores = JSONField(null=True, blank=True)
