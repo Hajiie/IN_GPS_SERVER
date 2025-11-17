@@ -55,10 +55,12 @@ def shoulder_swing_video_upload_path(instance, filename):
 
 class Player(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    number = models.IntegerField(null=True, blank=True)
     playerImg = models.ImageField(upload_to=player_image_upload_path, null=True, blank=True)
     playerStandImg = models.ImageField(upload_to=player_standing_image_upload_path, null=True, blank=True)
     optimumForm = models.ForeignKey('VideoAnalysis', on_delete=models.SET_NULL, null=True, blank=True, related_name='optimum_form')
     name = models.CharField(max_length=100)
+    eng_name = models.CharField(max_length=100, null=True, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
     weight = models.IntegerField(null=True, blank=True)

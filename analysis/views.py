@@ -524,7 +524,9 @@ def players_list_api(request):
         players_data = [
             {
                 'id': str(player.id),
+                'number':player.number,
                 'name': player.name,
+                'eng_name': player.eng_name,
                 'playerImg': player.playerImg.url if player.playerImg else None,
                 'birth_date': player.birth_date.isoformat() if player.birth_date else None,
                 'height': player.height,
@@ -546,7 +548,9 @@ def player_detail_api(request, player_id):
         team_name = PlayerSeason.objects.filter(player_id=player_id, year=timezone.now().year).values_list('team', flat=True).first()
         player_data = {
             'id': str(player.id),
+            'number':player.number,
             'name': player.name,
+            'eng_name':player.eng_name,
             'playerStandImg': player.playerStandImg.url if player.playerStandImg else None,
             'birth_date': player.birth_date.isoformat() if player.birth_date else None,
             'height': player.height,
@@ -565,7 +569,9 @@ def player_detail_api(request, player_id):
 @csrf_exempt
 def player_create_api(request):
     if request.method == 'POST':
+        number = request.POST.get('number')
         name = request.POST.get('name')
+        eng_name = request.POST.get('eng_name')
         playerImg = request.FILES.get('pimage')
         playerStandingImg = request.FILES.get('simage')
 
@@ -585,6 +591,7 @@ def player_create_api(request):
             return JsonResponse({'result': 'fail', 'reason': '이미 존재하는 선수입니다'}, status=400)
         
         player = Player.objects.create(
+            number=number, eng_name=eng_name,
             name=name, birth_date=birth_date,
             height=request.POST.get('height'), weight=request.POST.get('weight'),
             throwing_hand=request.POST.get('throwing_hand'), batting_hand=request.POST.get('batting_hand'),
