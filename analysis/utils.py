@@ -1074,9 +1074,9 @@ def render_shoulder_angular_velocity_video(analysis_result: dict, save_path: str
             w_curr = omega_degps[frame_idx]
             if not np.isnan(w_curr):
                 col = omega_to_color_bgr(w_curr, w_low, w_high)
-                draw_speed_label_box(final_frame, w_curr, col, label="Shoulder ω", unit=" deg/s")
+                draw_speed_label_box(final_frame, w_curr, col, label="Shoulder Speed", unit=" deg/s")
 
-        draw_color_legend(final_frame, w_low, w_high, label="Shoulder ω (deg/s)", pos=(20, 20))
+        draw_color_legend(final_frame, w_low, w_high, label="Shoulder Speed (deg/s)", pos=(20, 20))
 
         out.write(final_frame)
 
