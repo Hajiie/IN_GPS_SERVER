@@ -65,7 +65,6 @@ cover/
 
 # Translations
 *.mo
-*.pot
 
 # Scrapy stuff:
 .scrapy
@@ -196,15 +195,11 @@ model_path/
 media/results/
 
 # 임시 파일들
-*.tmp
-*.temp
 *.swp
 *.swo
-*~
 
 # 로그 파일들
 logs/
-*.log
 
 # 설정 파일들 (민감한 정보 포함 가능)
 config.ini
@@ -224,5 +219,4 @@ secrets.json
 *.tar.gz
 *.rar
 *.7z
-/analysis/migrations/
 *.ipynb

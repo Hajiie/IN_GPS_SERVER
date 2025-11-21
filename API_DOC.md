@@ -26,7 +26,9 @@
 [
     {
         "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
+        "number": "1",
         "name": "홍길동",
+        "eng_name": "Hong Gil Dong",
         "playerImg": "/media/player_images/선수UUID/선수이미지UUID.png",
         "birth_date": "1995-03-15",
         "height": 185,
@@ -48,6 +50,8 @@
   - `pimage` (File): 프로필 이미지 파일
   - `simage` (File): 상세 이미지 파일
   - `name` (String): 선수 이름
+  - `eng_name` (String): 선수 영문명
+  - `number` (Int): 선수 등번호
   - `birth_date` (String): 선수 생년월일 (YYYY-MM-DD)
   - `height` (Int): 선수 키
   - `weight` (Int): 선수 체중
@@ -72,7 +76,9 @@
 ```json
 {
     "id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
+    "number": "1",
     "name": "홍길동",
+    "eng_name": "Hong Gil Dong",
     "playerStandImg": "/media/player_standing_images/선수UUID/선수스탠딩이미지.png",
     "birth_date": "1995-03-15",
     "height": 185,
@@ -243,8 +249,8 @@
   "result": "success",
   "video_id": "d1e2f3a4-b5c6-7890-1234-567890abcdef",
   "video_name": "사용자 지정 영상 이름",
-  "video_url": "/media/videos/사용자-지정-영상-이름.mp4",
-  "thumbnail_url": "/media/thumbnails/사용자-지정-영상-이름.jpg",
+  "video_url": "/media/videos/<uuid:player_id>/<uuid:video_id>.mp4",
+  "thumbnail_url": "/media/thumbnails/<uuid:player_id>/<uuid:thumbnail_id>.jpg",
   "player_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
   "player_name": "선수이름"
 }
@@ -266,11 +272,12 @@
   {
     "id": "d1e2f3a4-b5c6-7890-1234-567890abcdef",
     "video_name": "사용자 지정 영상 이름",
-    "video_url": "/media/videos/사용자-지정-영상-이름.mp4",
-    "thumbnail_url": "/media/thumbnails/사용자-지정-영상-이름.jpg",
+    "video_url": "/media/videos/<uuid:player_id>/<uuid:video_id>.mp4",
+    "thumbnail_url": "/media/thumbnails/<uuid:player_id>/<uuid:thumbnail_id>.jpg",
     "upload_time": "2024-07-25T12:34:56Z",
     "player_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
-    "player_name": "홍길동"
+    "player_name": "홍길동",
+    "isAnalysis": true
   }
 ]
 ```
@@ -294,8 +301,8 @@
 {
     "result": "success",
     "video_name": "test03_01",
-    "video_url": "/media/media/videos/사용자-지정-영상-이름.mp4",
-    "thumbnail_url": "/media/thumbnails/사용자-지정-영상-이름.jpg",
+    "video_url": "/media/videos/<uuid:player_id>/<uuid:video_id>.mp4",
+    "thumbnail_url": "/media/thumbnails/<uuid:player_id>/<uuid:thumbnail_id>.jpg",
     "upload_time": "2025-10-28T14:32:47.635134+00:00",
     "player_id": "89688ec3-ae73-4598-9bb7-d6edc98d4bd7",
     "player_name": "홍길동",
@@ -310,7 +317,10 @@
     "release_frame_ankle": [1143, 894],
     "fixed_frame": 213,
     "frame_list": [32, 99, 213, 226, 241],
-    "skeleton_video_url": "/media/skeleton_videos/사용자-지정-영상-이름_skeleton.mp4",
+    "skeleton_video_url": "/media/skeleton_videos/<uuid:player_id>/<uuid:skeleton_id>.mp4",
+    "arm_video_url": "/media/arm_swing_videos/<uuid:player_id>/<uuid:arm_id>.mp4",
+    "shoulder_video_url": "/media/shoulder_swing_videos/<uuid:player_id>/<uuid:shoulder_id>.mp4",
+    "release_video_url": "/media/release_videos/<uuid:player_id>/<uuid:release_id>.mp4",
     "release_angle_height": {
         "angles": {
             "arm_angle": 150.49521009982092,
@@ -340,7 +350,11 @@
             "knee_angle": 177.70802307090733,
             "hand_height_m": 1.426872335668805
         },...
-    ]
+    ],
+    "arm_trajectory": [[952, 416], ...],
+    "arm_swing_speed": [1.742704666616396, ...],
+    "shoulder_swing_speed": [-461.0091283506458, ...],
+    "fps": 30
 }
 ```
 
@@ -479,10 +493,10 @@
 2구간에서 4구간까지의 팔 스윙 궤적, 팔 스윙 속도, 어깨 회전 속도를 반환
 ```json
 {
-  "result": "success",
-  "arm_trajectory": [[913,425],...],
-  "arm_swing_speed": [1.3865232754997097,...],
-  "shoulder_swing_speed": [-310.38960957989036,...]
+    "result": "success",
+    "arm_trajectory": [[913,425],...],
+    "arm_swing_speed": [1.3865232754997097,...],
+    "shoulder_swing_speed": [-310.38960957989036,...]
 }
 ```
 
@@ -492,9 +506,9 @@
 - **요청 본문 (JSON)**: 
 ```json
 {
-  "reference_id": "3f817408-87a9-46d6-8051-82bde67b898d",
-  "test_id": "5b3d9135-9df1-4951-8a88-eaf543288767",
-  "used_ids": [11, 12, 14, 16, 23, 24, 25] 
+    "reference_id": "3f817408-87a9-46d6-8051-82bde67b898d",
+    "test_id": "5b3d9135-9df1-4951-8a88-eaf543288767",
+    "used_ids": [11, 12, 14, 16, 23, 24, 25] 
 }
 ```
 - **응답**: `200 OK`
@@ -508,5 +522,22 @@
     ],
     "overall_score": 84.1370226039476,
     "worst_phase": 4
+}
+```
+
+### **DTW 유사도 분석 점수 기록 반환**
+`GET /analysis/dtw_similarity/<uuid:player_id>`
+- **설명**: 훈련점수 기록
+- **응답**: `200 OK`
+```json
+{
+    "result": "success",
+    "dtw_similarity_scores": [
+        {
+            "upload_time": "2025-11-21",
+            "overall_score": 100.0,
+            "isChanged": false
+        }, ...
+    ]
 }
 ```
