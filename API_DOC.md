@@ -36,9 +36,7 @@
         "throwing_hand": "R",
         "batting_hand": "R",
         "video_count": 0,
-        "team_name": "TestTeam",
-        "join_year": 2021,
-        "career_stats": "XX초-OO중-AA고"
+        "team_name": "TestTeam"
     },...
 ]
 ```
@@ -57,6 +55,8 @@
   - `weight` (Int): 선수 체중
   - `throwing_hand` (String): 피칭 시 사용하는 손
   - `batting_hand` (String): 타격 시 사용하는 손
+  - `join_year` (Int): 입단 연도
+  - `career_stats` (String): 경력 사항
 - **성공 응답**: `200 OK`
 ```json
 {
@@ -88,7 +88,8 @@
     "video_count": 0,
     "team_name": "팀명",
     "join_year": 2021,
-    "career_stats": "XX초-OO중-AA고"
+    "career_stats": "XX초-OO중-AA고",
+    "optimum_form": "d1e2f3a4-b5c6-7890-1234-567890abcdef"
 }
 ```
 
@@ -506,6 +507,7 @@
 - **요청 본문 (JSON)**: 
 ```json
 {
+    "player_id": "aed08db3-13cd-4cc9-aebb-a91d090312ef",
     "reference_id": "3f817408-87a9-46d6-8051-82bde67b898d",
     "test_id": "5b3d9135-9df1-4951-8a88-eaf543288767",
     "used_ids": [11, 12, 14, 16, 23, 24, 25] 

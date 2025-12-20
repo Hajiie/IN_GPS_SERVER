@@ -41,6 +41,7 @@ def upload_video(request):
     video_file = request.FILES['video']
     player_name = request.POST.get('player_name')
     birth_date = request.POST.get('birth_date')
+    print(birth_date)
 
     if not player_name or not birth_date:
         return JsonResponse({'result': 'fail', 'reason': '선수 이름과 생년월일을 모두 입력해주세요'}, status=400)
@@ -49,8 +50,8 @@ def upload_video(request):
         birth_date_obj = timezone.datetime.strptime(birth_date, '%Y-%m-%d').date()
         player, _ = Player.objects.get_or_create(
             name=player_name,
-            birth_date=birth_date_obj,
-            defaults={'name': player_name, 'birth_date': birth_date_obj}
+            birth_date__date=birth_date_obj,
+            defaults={'birth_date': birth_date_obj}
         )
     except ValueError:
         return JsonResponse({'result': 'fail', 'reason': '생년월일 형식이 올바르지 않습니다. YYYY-MM-DD 형식으로 입력해주세요'}, status=400)
@@ -585,8 +586,12 @@ def player_create_api(request):
                 birth_date = timezone.datetime.strptime(birth_date_str, '%Y-%m-%d').date()
             except ValueError:
                 return JsonResponse({'result': 'fail', 'reason': '생년월일 형식이 올바르지 않습니다.'}, status=400)
-        
-        query = Player.objects.filter(name=name, birth_date=birth_date) if birth_date else Player.objects.filter(name=name, birth_date__isnull=True)
+
+        if birth_date:
+            query = Player.objects.filter(name=name, birth_date__date=birth_date)
+        else:
+            query = Player.objects.filter(name=name, birth_date__isnull=True)
+
         if query.exists():
             return JsonResponse({'result': 'fail', 'reason': '이미 존재하는 선수입니다'}, status=400)
         
