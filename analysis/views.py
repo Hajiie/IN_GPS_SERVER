@@ -30,6 +30,12 @@ except Exception as e:
 
 @csrf_exempt
 def upload_video(request):
+    """
+    비디오 업로드 API
+    - POST 요청만 허용
+    - 비디오 파일, 선수 이름, 생년월일을 받아 저장
+    - 썸네일 생성 및 저장
+    """
     if request.method != 'POST' or not request.FILES.get('video'):
         return JsonResponse({'result': 'fail', 'reason': '올바르지 않은 요청입니다.'}, status=400)
 
@@ -84,6 +90,11 @@ def upload_video(request):
 
 @csrf_exempt
 def videos_list_api(request):
+    """
+    비디오 목록 조회 API
+    - GET 요청만 허용
+    - 업로드된 모든 비디오 목록을 최신순으로 반환
+    """
     if request.method == 'GET':
         videos = VideoAnalysis.objects.all().order_by('-upload_time')
         if videos is None:
@@ -107,6 +118,11 @@ def videos_list_api(request):
 
 @csrf_exempt
 def delete_video_api(request, video_id):
+    """
+    비디오 삭제 API
+    - DELETE 요청만 허용
+    - video_id에 해당하는 비디오 삭제
+    """
     if request.method != 'DELETE':
         return JsonResponse({'result': 'fail', 'reason': 'DELETE method only'}, status=405)
 
@@ -122,6 +138,11 @@ def delete_video_api(request, video_id):
 
 @csrf_exempt
 def video_detail_api(request, video_id):
+    """
+    비디오 상세 정보 조회 API
+    - GET 요청만 허용
+    - video_id에 해당하는 비디오의 상세 정보 및 분석 결과 반환
+    """
     if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
@@ -160,6 +181,11 @@ def video_detail_api(request, video_id):
 
 @csrf_exempt
 def frame_metrics_api(request, video_id):
+    """
+    프레임별 분석 지표 조회 API
+    - GET 요청만 허용
+    - video_id에 해당하는 비디오의 프레임별 분석 지표 반환
+    """
     if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
@@ -172,6 +198,11 @@ def frame_metrics_api(request, video_id):
 
 @csrf_exempt
 def arm_trajectory_api(request, video_id):
+    """
+    팔 궤적 데이터 조회 API
+    - GET 요청만 허용
+    - video_id에 해당하는 비디오의 팔 궤적 및 스윙 속도 데이터 반환
+    """
     if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result:': 'fail', 'reason': 'No video_id provided'}, status=400)
@@ -189,6 +220,12 @@ def arm_trajectory_api(request, video_id):
 
 @csrf_exempt
 def analyze_video_api(request, video_id):
+    """
+    비디오 분석 요청 API
+    - POST 요청만 허용
+    - video_id에 해당하는 비디오를 분석하고 결과를 저장
+    - 분석 결과(프레임 정보, 구속, 릴리즈 정보, 스켈레톤 영상 등) 반환
+    """
     if request.method == 'POST':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No video_id provided'}, status=400)
@@ -352,6 +389,11 @@ def analyze_video_api(request, video_id):
 
 @csrf_exempt
 def ball_speed_api(request, video_id):
+    """
+    구속 분석 결과 조회 API
+    - GET 요청만 허용
+    - video_id에 해당하는 비디오의 구속 분석 결과 반환
+    """
     if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
@@ -364,6 +406,11 @@ def ball_speed_api(request, video_id):
 
 @csrf_exempt
 def release_angle_height_api(request, video_id):
+    """
+    릴리즈 각도 및 높이 분석 결과 조회 API
+    - GET 요청만 허용
+    - video_id에 해당하는 비디오의 릴리즈 각도 및 높이 분석 결과 반환
+    """
     if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
@@ -376,6 +423,12 @@ def release_angle_height_api(request, video_id):
 
 @csrf_exempt
 def dtw_similarity_api(request):
+    """
+    DTW 유사도 분석 요청 API
+    - POST 요청만 허용
+    - 두 비디오(reference_id, test_id) 간의 DTW 유사도 분석 수행
+    - 분석 결과(구간별 점수, 거리, 종합 점수 등) 반환 및 저장
+    """
     if request.method == 'POST':
         data = json.loads(request.body)
         player_id = data.get('player_id')
@@ -449,6 +502,12 @@ def dtw_similarity_api(request):
 
 @csrf_exempt
 def dtw_similarity_score_api(request, player_id):
+    """
+    선수별 DTW 유사도 점수 이력 조회 API
+    - GET 요청만 허용
+    - 최근 31일간의 DTW 유사도 점수 이력을 반환
+    - 같은 날짜의 기록은 평균 점수로 계산
+    """
     if request.method == 'GET':
         try:
             # 요청이 들어온 일자로부터 31일 간의 기록만 반환
@@ -500,6 +559,11 @@ def dtw_similarity_score_api(request, player_id):
 
 @csrf_exempt
 def skeleton_coords_api(request, video_id):
+    """
+    스켈레톤 좌표 데이터 조회 API
+    - GET 요청만 허용
+    - video_id에 해당하는 비디오의 스켈레톤 좌표 데이터 반환
+    """
     if request.method == 'GET':
         if not video_id:
             return JsonResponse({'result': 'fail', 'reason': 'No id provided'}, status=400)
@@ -518,6 +582,11 @@ def skeleton_coords_api(request, video_id):
 
 @csrf_exempt
 def players_list_api(request):
+    """
+    선수 목록 조회 API
+    - GET 요청만 허용
+    - 등록된 모든 선수 목록 반환
+    """
     if request.method == 'GET':
         players = Player.objects.all().order_by('name')
         team_name = PlayerSeason.objects.filter(year=timezone.now().year).values_list('team','player_id')
@@ -544,6 +613,11 @@ def players_list_api(request):
 
 @csrf_exempt
 def player_detail_api(request, player_id):
+    """
+    선수 상세 정보 조회 API
+    - GET 요청만 허용
+    - player_id에 해당하는 선수의 상세 정보 반환
+    """
     if request.method == 'GET':
         player = get_object_or_404(Player, id=player_id)
         team_name = PlayerSeason.objects.filter(player_id=player_id, year=timezone.now().year).values_list('team', flat=True).first()
@@ -569,6 +643,11 @@ def player_detail_api(request, player_id):
 
 @csrf_exempt
 def player_create_api(request):
+    """
+    선수 등록 API
+    - POST 요청만 허용
+    - 선수 정보(이름, 생년월일, 신체정보 등)를 받아 등록
+    """
     if request.method == 'POST':
         number = request.POST.get('number')
         name = request.POST.get('name')
@@ -616,6 +695,11 @@ def player_create_api(request):
 
 @csrf_exempt
 def player_update_api(request, player_id):
+    """
+    선수 정보 수정 API
+    - PUT 요청만 허용
+    - player_id에 해당하는 선수의 정보 수정
+    """
     if request.method == 'PUT':
         data = json.loads(request.body)
         player = get_object_or_404(Player, id=player_id)
@@ -654,6 +738,12 @@ def player_update_api(request, player_id):
 
 @csrf_exempt
 def player_delete_api(request, player_id):
+    """
+    선수 삭제 API
+    - DELETE 요청만 허용
+    - player_id에 해당하는 선수 삭제
+    - 연결된 비디오가 있으면 삭제 불가
+    """
     if request.method == 'DELETE':
         player = get_object_or_404(Player, id=player_id)
         if player.videos.count() > 0:
@@ -668,6 +758,11 @@ def player_delete_api(request, player_id):
 
 @csrf_exempt
 def player_season_stats_api(request, player_id):
+    """
+    선수 시즌 기록 조회 및 추가 API
+    - GET: 선수의 모든 시즌 기록 조회
+    - POST: 선수의 특정 시즌 기록 추가 또는 업데이트
+    """
     player = get_object_or_404(Player, id=player_id)
 
     if request.method == 'GET':
@@ -756,6 +851,11 @@ def player_season_stats_api(request, player_id):
 
 @csrf_exempt
 def register_optimum_api(request, player_id):
+    """
+    선수의 최적 폼 영상 등록 API
+    - POST 요청만 허용
+    - player_id에 해당하는 선수의 최적 폼 영상을 등록
+    """
     if request.method == 'POST':
         data = json.loads(request.body)
         player = get_object_or_404(Player, id=player_id)
